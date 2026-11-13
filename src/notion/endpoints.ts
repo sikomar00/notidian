@@ -21,6 +21,15 @@ export class NotionApiError extends Error {
   }
 }
 
+export const isUnauthorized = (error: unknown): boolean => error instanceof NotionApiError && error.status === 401;
+
+/** 상태 코드가 "그 대상을 읽을 수 없음"을 뜻하면 이유를 돌려준다. 400은 데이터베이스 같은 페이지가 아닌 대상이다(시험 S-7). */
+export function reasonForStatus(status: number): UnreadableReason | undefined {
+  if (status === 403) return 'forbidden';
+  if (status === 404) return 'not-found';
+  return status === 400 ? 'not-a-page' : undefined;
+}
+
 function ensureOk(res: NotionResponse): Json {
   if (res.status !== 200) throw new NotionApiError(res.status, codeOf(res.body));
   return asRecord(res.body);
@@ -71,6 +80,16 @@ export async function searchAllPages(request: Requester): Promise<{ pages: Notio
   return { pages, requests };
 }
 
+async function fetchChildren(request: Requester, id: string, rootId: string, suffix: string): Promise<Json | undefined> {
+  try {
+    return ensureOk(await request({ method: 'GET', path: `/v1/blocks/${id}/children?page_size=100${suffix}` }));
+  } catch (error) {
+    // 하위 블록 하나를 못 읽는다고(권한 없는 동기화 블록 등) 페이지 전체를 포기하지 않고 그 가지만 건너뛴다
+    if (id !== rootId && error instanceof NotionApiError && reasonForStatus(error.status)) return undefined;
+    throw error;
+  }
+}
+
 /** 페이지 본문의 블록을 1단계씩 내려가며 모두 읽는다. 읽는 동안 메모리에서만 쓴다. */
 export async function readBlockTree(
   request: Requester,
@@ -83,8 +102,9 @@ export async function readBlockTree(
     let cursor: string | undefined;
     do {
       const suffix = cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : '';
-      const body = ensureOk(await request({ method: 'GET', path: `/v1/blocks/${id}/children?page_size=100${suffix}` }));
+      const body = await fetchChildren(request, id, rootId, suffix);
       requests += 1;
+      if (!body) break;
       for (const block of listOf(body).map(asRecord)) {
         blocks.push(block);
         const follow = block.has_children === true && !NO_FOLLOW.has(String(block.type));
@@ -106,10 +126,8 @@ export async function fetchPage(request: Requester, id: string): Promise<PageFet
   const res = await request({ method: 'GET', path: `/v1/pages/${id}` });
   if (res.status === 200) return { kind: 'ok', page: asRecord(res.body) };
   if (res.status === 401) throw new NotionApiError(401, codeOf(res.body));
-  if (res.status === 403) return { kind: 'unreadable', reason: 'forbidden' };
-  if (res.status === 404) return { kind: 'unreadable', reason: 'not-found' };
-  if (res.status === 400) return { kind: 'unreadable', reason: 'not-a-page' };
-  return { kind: 'failed', status: res.status };
+  const reason = reasonForStatus(res.status);
+  return reason ? { kind: 'unreadable', reason } : { kind: 'failed', status: res.status };
 }
 
 /** relation이 25개를 넘으면 페이지 응답에 일부만 오므로 속성 항목 API로 나머지를 읽는다. */

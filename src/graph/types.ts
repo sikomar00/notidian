@@ -13,6 +13,8 @@ export interface PageRecord {
   status: PageStatus;
   unreadableReason?: UnreadableReason;
   readAt?: string;
+  /** 읽지 않고 존재만 확인한 시각(검색에 안 나오는 페이지를 다시 확인할 때) */
+  checkedAt?: string;
   failCount: number;
 }
 

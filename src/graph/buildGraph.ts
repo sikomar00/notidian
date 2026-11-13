@@ -2,10 +2,14 @@ import { mergeLinks } from './mergeLinks.ts';
 import type { GraphData, GraphLink, GraphNode, PageRecord, RawLink } from './types.ts';
 
 export const UNREADABLE_TITLE = '읽을 수 없는 페이지';
+export const UNTITLED = '(제목 없음)';
 
 function placeholder(id: string): GraphNode {
   return { id, title: UNREADABLE_TITLE, kind: 'page', unreadable: true, degree: 0 };
 }
+
+// 제목이 비어 있으면(제목 없는 페이지, 아직 못 읽은 대상) 점에 이름이 없어 찾을 수도 없으므로 대신 쓸 이름을 준다
+const titleOf = (page: PageRecord): string => page.title || (page.status === 'unreadable' ? UNREADABLE_TITLE : UNTITLED);
 
 /**
  * 색인(페이지·연결)에서 그릴 점과 선을 만든다.
@@ -20,7 +24,7 @@ export function buildGraph(
   const nodes = new Map<string, GraphNode>();
   for (const page of pages) {
     if (hidden.has(page.id)) continue;
-    nodes.set(page.id, { id: page.id, title: page.title, kind: page.kind, unreadable: page.status === 'unreadable', degree: 0 });
+    nodes.set(page.id, { id: page.id, title: titleOf(page), kind: page.kind, unreadable: page.status === 'unreadable', degree: 0 });
   }
   const merged = mergeLinks(rawLinks.filter((link) => !hidden.has(link.from) && !hidden.has(link.to)));
   for (const { source, target } of merged) {
