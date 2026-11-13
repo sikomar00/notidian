@@ -21,6 +21,11 @@ export function applyFilters(data: GraphData, hidden: KindFilter): GraphData {
   return keepOnly(data, new Set(data.nodes.filter((node) => !isHidden(node, hidden)).map((node) => node.id)));
 }
 
+/** 연결이 하나도 없는 점(외톨이)을 뺀다. 하위 페이지 선은 연결로 치지 않는다. `keep`의 점은 외톨이여도 남긴다. */
+export function hideIsolated(data: GraphData, keep: readonly (string | null)[] = []): GraphData {
+  return keepOnly(data, new Set(data.nodes.filter((node) => node.degree > 0 || keep.includes(node.id)).map((node) => node.id)));
+}
+
 /** 선택한 페이지에서 `depth`단계 안에 있는 점만 남긴다(방향은 따지지 않고, 그려진 선이면 하위 페이지 선도 따라간다). 그 페이지가 없으면 그대로 둔다. */
 export function localSubgraph(data: GraphData, centerId: string, depth: number): GraphData {
   if (!data.nodes.some((node) => node.id === centerId)) return data;
