@@ -1,6 +1,7 @@
 import { urlToPageId } from '../../notion/urlToPageId.ts';
 import { forgetFullTab, openFullTab, openSidePanel, toggleOverlay } from '../containers.ts';
 import { isViewMode } from '../messages.ts';
+import { hasToken, tokenChanged } from '../tokenStore.ts';
 import type { ViewMode } from '../messages.ts';
 
 // 사이드 패널은 클릭 처리 안에서 바로 열어야 해서, 모드와 준비 상태를 메모리에 올려 두고 기다림 없이 분기한다
@@ -8,19 +9,24 @@ let viewMode: ViewMode = 'side';
 let ready = false;
 let loaded = false;
 
-function applyStored(stored: Record<string, unknown>): void {
+// 토큰은 "브라우저를 닫으면 지우기"를 켜면 메모리 저장소(session)에 있어서 두 곳을 함께 본다.
+// 색인 중에는 진행 상태가 자주 바뀌므로, 토큰은 토큰이 바뀌었을 때만 다시 읽는다
+let tokenPresent = false;
+async function refreshState(rereadToken: boolean): Promise<void> {
+  const [stored, present] = await Promise.all([chrome.storage.local.get(['viewMode', 'progress']), rereadToken ? hasToken() : tokenPresent]);
+  tokenPresent = present;
   if (isViewMode(stored.viewMode)) viewMode = stored.viewMode;
   const phase = (stored.progress as { phase?: string } | undefined)?.phase;
-  ready = typeof stored.token === 'string' && stored.token !== '' && phase !== undefined && phase !== 'idle';
+  ready = tokenPresent && phase !== undefined && phase !== 'idle';
 }
 
-const loading = chrome.storage.local.get(['viewMode', 'token', 'progress']).then((stored) => {
-  applyStored(stored);
+const loading = refreshState(true).then(() => {
   loaded = true;
 });
 
-chrome.storage.onChanged.addListener((_changes, area) => {
-  if (area === 'local') void chrome.storage.local.get(['viewMode', 'token', 'progress']).then(applyStored);
+chrome.storage.onChanged.addListener((changes, area) => {
+  const token = tokenChanged(changes, area);
+  if (area === 'local' || token) void refreshState(token);
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => void forgetFullTab(tabId));

@@ -1,4 +1,5 @@
 import { autoRefreshMinutes, shouldAutoRefresh } from '../autoRefresh.ts';
+import { hasToken } from '../tokenStore.ts';
 import { startIndex } from './indexer.ts';
 import { IDLE_PROGRESS } from './types.ts';
 import type { Progress } from './types.ts';
@@ -19,10 +20,9 @@ async function applyAlarm(): Promise<void> {
 }
 
 async function refreshIfReady(): Promise<void> {
-  const { progress, token, autoRefreshMinutes: stored } = await chrome.storage.local.get(['progress', 'token', 'autoRefreshMinutes']);
-  const hasToken = typeof token === 'string' && token !== '';
+  const [{ progress, autoRefreshMinutes: stored }, tokenPresent] = await Promise.all([chrome.storage.local.get(['progress', 'autoRefreshMinutes']), hasToken()]);
   const current = (progress as Progress | undefined) ?? IDLE_PROGRESS;
-  if (shouldAutoRefresh(current, hasToken, autoRefreshMinutes(stored), Date.now())) await startIndex(true);
+  if (shouldAutoRefresh(current, tokenPresent, autoRefreshMinutes(stored), Date.now())) await startIndex(true);
 }
 
 // 실패는 설정 화면에서 보이도록 저장한다(서비스 워커에는 사용자가 볼 화면이 없다)

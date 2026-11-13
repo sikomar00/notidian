@@ -4,6 +4,8 @@ export type IndexCommand = 'start' | 'stop' | 'clear';
 
 export type Message =
   | { type: 'save-token'; token: string; kind: TokenKind }
+  | { type: 'token-session'; sessionOnly: boolean }
+  | { type: 'clear-token' }
   | { type: 'index'; command: IndexCommand }
   | { type: 'toggle-overlay' }
   | { type: 'close-overlay' };

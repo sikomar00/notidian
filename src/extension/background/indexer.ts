@@ -3,6 +3,7 @@ import { createNotionClient } from '../../notion/http.ts';
 import { withRetry } from '../../notion/retry.ts';
 import type { IndexCommand, SaveTokenReply, TokenKind } from '../messages.ts';
 import { beginCrawl, runCrawl } from './crawl.ts';
+import { readToken, writeToken } from '../tokenStore.ts';
 import { learnDatabaseNames } from './databaseNames.ts';
 import type { CrawlOutcome } from './crawl.ts';
 import { openIdbStore } from './idbStore.ts';
@@ -31,11 +32,6 @@ async function readProgress(): Promise<Progress> {
 
 async function writeProgress(progress: Progress): Promise<void> {
   await chrome.storage.local.set({ progress });
-}
-
-async function readToken(): Promise<string | undefined> {
-  const { token } = await chrome.storage.local.get('token');
-  return typeof token === 'string' && token !== '' ? token : undefined;
 }
 
 // 색인이 끝나면 알람을 끄고 진행 상태를 남긴다. 조각이 끝났을 뿐이면(budget) 알람이 다음 조각을 깨운다
@@ -106,6 +102,11 @@ export async function startIndex(auto = false): Promise<void> {
   void runChunk();
 }
 
+/** 돌고 있는 색인만 멈춘다(토큰을 지울 때). 돌고 있지 않으면 진행 상태를 건드리지 않는다. */
+export async function stopIfRunning(): Promise<void> {
+  if (running || (await readProgress()).phase === 'running') await stopIndex();
+}
+
 async function stopIndex(): Promise<void> {
   stopRequested = true;
   await chrome.alarms.clear(ALARM);
@@ -145,7 +146,7 @@ export async function saveToken(token: string, kind: TokenKind): Promise<SaveTok
   } catch {
     return { ok: false, message: 'Notion에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.' };
   }
-  await chrome.storage.local.set({ token: trimmed, tokenKind: kind });
+  await writeToken(trimmed, kind);
   // 페이지를 연결에 추가하지 않은 채 끝내는 경우가 많아서, 저장 직후 읽을 수 있는 페이지 수를 알려 준다. 확인에 실패해도 저장은 그대로 둔다
   const access = await probeAccess(request).catch(() => undefined);
   return access ? { ok: true, pageCount: access.count, more: access.more } : { ok: true };

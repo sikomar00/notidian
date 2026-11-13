@@ -1,7 +1,8 @@
 import './autoRefresh.ts';
 import './dispatch.ts';
 import type { Message } from '../messages.ts';
-import { handleIndexCommand, saveToken } from './indexer.ts';
+import { clearToken, setSessionOnly } from '../tokenStore.ts';
+import { handleIndexCommand, saveToken, stopIfRunning } from './indexer.ts';
 
 const EXTENSION_PAGES = chrome.runtime.getURL('');
 
@@ -16,6 +17,14 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
   if (!fromExtensionPage) return false;
   if (message.type === 'save-token') {
     void saveToken(message.token, message.kind).then(sendResponse);
+    return true;
+  }
+  if (message.type === 'token-session' || message.type === 'clear-token') {
+    const task = message.type === 'clear-token' ? stopIfRunning().then(clearToken) : setSessionOnly(message.sessionOnly);
+    task.then(
+      () => sendResponse({ ok: true }),
+      (error: unknown) => sendResponse({ ok: false, message: error instanceof Error ? error.message : String(error) }),
+    );
     return true;
   }
   if (message.type === 'index') {
