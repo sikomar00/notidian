@@ -38,6 +38,10 @@ export async function optionsAndSeed(browser: Browser, check: Check): Promise<vo
   await page.shot('options-privacy-360');
   await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.shot('options-first');
+  // 저장된 페이지가 없는 첫 실행에도 그래프 화면이 빈 안내를 보여 준다
+  const empty = await browser.open(browser.ext('graph.html?mode=full'));
+  await expect(check, empty, '그래프: 처음(데이터 없음)에는 빈 안내와 설정 열기', `!document.getElementById('empty').hidden && !document.getElementById('empty-settings').hidden`);
+  empty.close();
   await page.run(SEED_SAMPLE);
   await expect(check, page, '설정: 토큰·지도 있으면 3단계가 지금 할 차례', `${STEPS} === 'done,done,active'`, STEPS);
 }
@@ -122,4 +126,22 @@ export async function currentPage(browser: Browser, check: Check): Promise<void>
   await page.run(`document.getElementById('view-toggle').click()`);
   await page.run(`chrome.storage.session.set({ focusPageId: 'p5' })`);
   await expect(check, page, '지금 페이지: 목록 보기에서도 선택', panelStarts('데이터 모델'), PANEL);
+}
+
+/** 자동 다시 만들기: 고른 주기로 알람이 걸리고, 끄면 사라지며, 고른 값이 남는다. 상태 줄에 마지막 갱신 시각이 보인다(P2-4). */
+export async function autoRefreshSetting(browser: Browser, check: Check): Promise<void> {
+  const page = await browser.open(browser.ext('options.html'));
+  await waitFor(page, `document.getElementById('auto-refresh') !== null && document.readyState === 'complete'`);
+  const choose = (value: string): Promise<unknown> => page.run(`(() => { const s = document.getElementById('auto-refresh'); s.value = '${value}'; s.dispatchEvent(new Event('change')); })()`);
+  const period = `chrome.alarms.get('notidian-auto-refresh').then((a) => a?.periodInMinutes ?? 0)`;
+  await choose('30');
+  await expect(check, page, '자동 갱신: 30분을 고르면 30분 주기 알람', `${period}.then((m) => m === 30)`, period);
+  await page.run('window.__beforeReload = true');
+  await page.send('Page.reload');
+  await waitFor(page, `window.__beforeReload === undefined && document.readyState === 'complete'`);
+  await expect(check, page, '자동 갱신: 다시 열어도 고른 값이 남음', `document.getElementById('auto-refresh')?.value === '30'`, `document.getElementById('auto-refresh')?.value`);
+  await choose('0');
+  await expect(check, page, '자동 갱신: 끄면 알람이 사라짐', `${period}.then((m) => m === 0)`, period);
+  await page.run(`chrome.storage.local.set({ progress: { phase: 'done', read: 40, discovered: 40, finishedAt: Date.now() - 5 * 60_000 } })`);
+  await expect(check, page, '상태 줄: 마지막 갱신 시각', `document.getElementById('progress').textContent.endsWith('5분 전 갱신')`, `document.getElementById('progress').textContent`);
 }
