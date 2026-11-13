@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { computeSteps } from '../src/extension/options/steps.ts';
-import { applyFilters, SHOW_ALL } from '../src/graph/filter.ts';
+import { applyFilters, localSubgraph, SHOW_ALL } from '../src/graph/filter.ts';
 import { buildRows, linkedPages } from '../src/graph/rows.ts';
 import type { GraphData } from '../src/graph/types.ts';
 import { probeAccess } from '../src/notion/endpoints.ts';
@@ -69,4 +69,22 @@ test('연결 패널: 받은·보낸 상대(양방향은 양쪽, 하위 페이지
     const linked = linkedPages(data, row.id);
     assert.deepEqual([linked.incoming.length, linked.outgoing.length], [row.received, row.sent]);
   }
+});
+
+test('로컬 그래프: 선택한 페이지에서 단계 수만큼 방향 없이 넓히고, 연결 수를 다시 센다', () => {
+  const chain: GraphData = {
+    nodes: ['a', 'b', 'c', 'd', 'e'].map((id) => node(id)),
+    links: [
+      { source: 'a', target: 'b', bidirectional: false, hierarchy: false },
+      { source: 'c', target: 'b', bidirectional: false, hierarchy: false },
+      { source: 'c', target: 'd', bidirectional: false, hierarchy: false },
+      { source: 'e', target: 'd', bidirectional: false, hierarchy: true },
+    ],
+  };
+  const ids = (depth: number) => localSubgraph(chain, 'b', depth).nodes.map((n) => n.id);
+  assert.deepEqual(ids(1), ['a', 'b', 'c']);
+  assert.deepEqual(ids(2), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(ids(3), ['a', 'b', 'c', 'd', 'e']);
+  assert.equal(localSubgraph(chain, 'b', 1).nodes.find((n) => n.id === 'c')?.degree, 1);
+  assert.equal(localSubgraph(chain, 'zz', 1), chain);
 });
