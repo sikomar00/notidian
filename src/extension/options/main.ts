@@ -5,7 +5,8 @@ import type { Progress } from '../background/types.ts';
 import { openFullTab } from '../containers.ts';
 import { byId } from '../dom.ts';
 import type { IndexCommand, Message, SaveTokenReply, TokenKind } from '../messages.ts';
-import { describeProgress } from '../progressText.ts';
+import { autoRefreshMinutes } from '../autoRefresh.ts';
+import { describeProgress, keepTimeFresh } from '../progressText.ts';
 import { computeSteps, STEP_STATE_TEXT } from './steps.ts';
 import { renderUnreadable } from './view.ts';
 
@@ -73,8 +74,22 @@ async function refreshUnreadable(): Promise<void> {
   renderUnreadable(byId('unreadable-list'), byId('unreadable-summary'), await store.listPages());
 }
 
+const autoRefresh = byId<HTMLSelectElement>('auto-refresh');
+autoRefresh.addEventListener('change', () => {
+  chrome.storage.local.set({ autoRefreshMinutes: Number(autoRefresh.value) }).catch((error: unknown) => {
+    byId('auto-refresh-status').textContent = `저장하지 못했어요: ${error instanceof Error ? error.message : String(error)}`;
+  });
+});
+keepTimeFresh(byId('progress'), () => progress);
+
+function renderAutoRefreshError(message: unknown): void {
+  byId('auto-refresh-status').textContent = typeof message === 'string' ? `자동 다시 만들기에 문제가 생겼어요: ${message}` : '';
+}
+
 async function loadInitialState(): Promise<void> {
-  const stored = await chrome.storage.local.get(['token', 'tokenKind', 'progress']);
+  const stored = await chrome.storage.local.get(['token', 'tokenKind', 'progress', 'autoRefreshMinutes', 'autoRefreshError']);
+  autoRefresh.value = String(autoRefreshMinutes(stored.autoRefreshMinutes));
+  renderAutoRefreshError(stored.autoRefreshError);
   hasToken = typeof stored.token === 'string' && stored.token !== '';
   byId<HTMLInputElement>('kind-pat').checked = stored.tokenKind === 'pat';
   byId('pat-warning').hidden = stored.tokenKind !== 'pat';
@@ -115,6 +130,7 @@ graphButton.addEventListener('click', () => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
+  if (changes.autoRefreshError) renderAutoRefreshError(changes.autoRefreshError.newValue);
   if (changes.token) {
     hasToken = typeof changes.token.newValue === 'string' && changes.token.newValue !== '';
     render();

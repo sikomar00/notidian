@@ -12,7 +12,7 @@ import type { Progress, ProgressPhase } from '../background/types.ts';
 import { byId } from '../dom.ts';
 import { isViewMode } from '../messages.ts';
 import type { Message, ViewMode } from '../messages.ts';
-import { describeProgress } from '../progressText.ts';
+import { describeProgress, keepTimeFresh } from '../progressText.ts';
 import { renderLinks } from './linksPanel.ts';
 import { followTabs } from './follow.ts';
 import { createListView } from './listview.ts';
@@ -63,6 +63,8 @@ let hasToken = false;
 let phase: ProgressPhase = 'idle';
 let lastReload = 0;
 let reloadTicket = 0;
+// 그래프에 보이는 것(제목·종류·상태·상위 페이지·연결)이 바뀌었는지 비교하는 값
+let lastSignature: string | undefined;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
 function openById(id: string): void {
@@ -199,6 +201,9 @@ async function reload(): Promise<void> {
   lastReload = Date.now();
   const [pages, links] = await Promise.all([store.listPages(), store.allLinks()]);
   if (ticket !== reloadTicket) return;
+  const signature = [...pages.map((p) => `${p.id}${p.title}${p.status}${p.kind}${p.parentPageId ?? ''}`), ...links.map((l) => `${l.from}>${l.to}`)].join('|');
+  if (signature === lastSignature) return;
+  lastSignature = signature;
   rawPages = pages;
   rawLinks = links;
   pagesById = new Map(pages.map((page) => [page.id, page]));
@@ -227,12 +232,15 @@ function renderReindex(): void {
   byId('reindex-hint').hidden = hasToken;
 }
 
+let lastProgress: Progress = IDLE_PROGRESS;
 function renderProgress(progress: Progress): void {
+  lastProgress = progress;
   phase = progress.phase;
   byId('status').textContent = describeProgress(progress);
   announce(progress);
   renderReindex();
 }
+keepTimeFresh(byId('status'), () => lastProgress);
 
 for (const target of ['side', 'center', 'full'] as const) {
   const button = byId<HTMLButtonElement>(`mode-${target}`);
