@@ -20,6 +20,8 @@
       button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
       button:focus-visible, input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
       .combo { position: relative; }
+      /* 넓은 화면은 보이는 라벨이 있어서 같은 말이 두 번 보이지 않게 안내 문구를 감춘다 */
+      #search::placeholder { color: transparent; }
       #search { min-width: 12em; }
       #search-list { position: absolute; z-index: 10; top: 100%; left: 0; min-width: 100%; max-height: 40vh; margin: 2px 0 0; padding: 0; overflow: auto; list-style: none; background: var(--bg); border: 1px solid var(--text); }
       #search-list li { padding: 4px 8px; cursor: pointer; }
@@ -43,11 +45,25 @@
       th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
       td button { white-space: nowrap; }
       /* 선택한 페이지의 받은·보낸 연결. 옆 패널처럼 좁으면 위아래로 쌓이고, 목록이 길면 그 안에서 스크롤한다 */
-      .links { flex-basis: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(14em, 1fr)); gap: 4px 16px; }
+      .drawer { border-top: 1px solid var(--text); padding: 8px; max-height: 40vh; overflow: auto; }
+      .links { display: grid; grid-template-columns: repeat(auto-fit, minmax(14em, 1fr)); gap: 4px 16px; }
       .links h2 { font-size: 13px; margin: 0; }
       .links .hint { font-size: 12px; margin: 0 0 2px; opacity: 0.8; }
-      .links ul { list-style: none; margin: 0; padding: 0; max-height: 6.5em; overflow: auto; }
+      .links ul { list-style: none; margin: 0; padding: 0; }
       .links li button { border: none; padding: 1px 4px; text-align: left; text-decoration: underline; }
+      /* 좁은 화면(옆 패널 등): 도구줄을 두 줄로 줄인다. 1줄 보기 방식+설정, 2줄 검색+목록, 범례는 작은 글씨로 모두 보이게 한다(옆으로 넘기면 숨은 항목을 못 찾는다) */
+      @media (max-width: 480px) {
+        header { padding: 6px 8px; }
+        .row { gap: 6px; margin-bottom: 4px; }
+        button, input { padding: 3px 6px; }
+        .combo { flex: 1 1 60%; min-width: 0; }
+        .combo label { display: flex; }
+        .search-label, .links .hint { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+        #search { min-width: 0; width: 100%; box-sizing: border-box; }
+        #search::placeholder { color: color-mix(in srgb, var(--text) 70%, var(--bg)); }
+        .legend { font-size: 13px; }
+        #status { font-size: 12px; }
+      }
       .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     </style>
   </head>
@@ -59,9 +75,10 @@
           <button id="mode-center" type="button" aria-pressed="false">가운데 창</button>
           <button id="mode-full" type="button" aria-pressed="false">전체 화면</button>
         </div>
+        <button id="open-settings" type="button">설정 열기</button>
         <div class="combo">
-          <label>제목 검색
-            <input id="search" type="text" role="combobox" aria-expanded="false" aria-controls="search-list" aria-autocomplete="list" autocomplete="off" />
+          <label><span class="search-label">제목 검색</span>
+            <input id="search" type="text" placeholder="제목 검색" role="combobox" aria-expanded="false" aria-controls="search-list" aria-autocomplete="list" autocomplete="off" />
           </label>
           <ul id="search-list" role="listbox" aria-label="검색 결과" hidden></ul>
         </div>
@@ -76,17 +93,7 @@
       <div class="row">
         <span id="status"></span>
         <button id="reindex" type="button" aria-describedby="reindex-hint">연결 지도 만들기</button>
-        <button id="open-settings" type="button">설정 열기</button>
         <span id="reindex-hint" hidden>먼저 설정에서 토큰을 저장해 주세요.</span>
-      </div>
-      <div id="selection" class="row" role="region" aria-label="선택한 페이지" hidden>
-        <span>선택한 페이지: <strong id="sel-title"></strong></span>
-        <button id="sel-open" type="button">Notion에서 열기</button>
-        <button id="sel-clear" type="button">선택 해제</button>
-        <div class="links">
-          <section aria-labelledby="in-title"><h2 id="in-title">받은 연결</h2><p class="hint">이 페이지를 가리키는 페이지</p><ul id="sel-in"></ul></section>
-          <section aria-labelledby="out-title"><h2 id="out-title">보낸 연결</h2><p class="hint">이 페이지가 가리키는 페이지</p><ul id="sel-out"></ul></section>
-        </div>
       </div>
       <div id="notice" role="status" aria-live="polite"></div>
     </header>
@@ -114,6 +121,18 @@
         </table>
       </section>
     </main>
+    <!-- 선택한 페이지는 그래프 아래 서랍에 둔다. 위 도구줄이 짧아져 좁은 옆 패널에서도 그래프가 주인공이 된다 -->
+    <section id="selection" class="drawer" aria-label="선택한 페이지" hidden>
+      <div class="row">
+        <span>선택한 페이지: <strong id="sel-title"></strong></span>
+        <button id="sel-open" type="button">Notion에서 열기</button>
+        <button id="sel-clear" type="button">선택 해제</button>
+      </div>
+      <div class="links">
+        <section aria-labelledby="in-title"><h2 id="in-title">받은 연결</h2><p class="hint">이 페이지를 가리키는 페이지</p><ul id="sel-in"></ul></section>
+        <section aria-labelledby="out-title"><h2 id="out-title">보낸 연결</h2><p class="hint">이 페이지가 가리키는 페이지</p><ul id="sel-out"></ul></section>
+      </div>
+    </section>
     <p id="live" class="sr-only" aria-live="polite"></p>
     <p id="progress-live" class="sr-only" aria-live="polite"></p>
     <script type="module" src="/src/extension/graph-view/main.ts"></script>
