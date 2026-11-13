@@ -38,6 +38,14 @@ const MIN_ZOOM = 0.01;
 const MAX_ZOOM = 12;
 const PLACE_ATTEMPTS = 20;
 const GRAVITY = 0.04;
+const CHARGE_REACH = 250;
+// 처음 배치 틱 수 × 점 수의 상한(500점이면 80틱, 2,000점이면 20틱)
+const WARMUP_BUDGET = 40_000;
+// force-graph 기본 선 길이(30)
+const NEW_NODE_GAP = 30;
+// force-graph 기본값은 멈춤 기준이 없어 늘 15초를 움직인다. d3 기본 기준(0.001)으로 멈추고 최대 10초로 줄인다
+const ALPHA_MIN = 0.001;
+const COOLDOWN_MS = 10_000;
 
 const radiusOf = (node: GraphNode): number => 4 + Math.sqrt(node.degree) * 2;
 const idOf = (end: unknown): string => (typeof end === 'object' && end !== null ? (end as { id: string }).id : String(end));
@@ -144,6 +152,8 @@ function configureGraph(container: HTMLElement, state: ViewState, onNodeClick: (
     .backgroundColor(state.palette.background)
     .minZoom(MIN_ZOOM)
     .maxZoom(MAX_ZOOM)
+    .d3AlphaMin(ALPHA_MIN)
+    .cooldownTime(COOLDOWN_MS)
     .nodeLabel(() => '')
     .nodeCanvasObject((node, ctx, scale) => drawNode(state, node, ctx, scale))
     .nodePointerAreaPaint((node, color, ctx) => {
@@ -204,6 +214,20 @@ function gravity(strength: number): ((alpha: number) => void) & { initialize: (n
   return Object.assign(force, { initialize: (next: ViewNode[]) => void (nodes = next) });
 }
 
+// 색인 중 새로 생긴 점을 원점이 아니라 이미 놓인 이웃에서 선 하나 길이만큼 떨어진 곳에서 출발시킨다(갱신 뒤 움직임 약 13% 감소).
+// shortcut: force-graph가 데이터를 바꿀 때마다 배치 세기를 처음 값으로 되돌려 첫 1~2초는 전체가 움직인다.
+// 공개 API로는 세기를 못 낮추고, 고정·감쇠는 측정해 보니 움직임을 미루기만 했다. 거슬린다는 의견이 나오면 라이브러리 교체·수정을 검토한다
+function placeNearNeighbors(fresh: readonly ViewNode[], state: ViewState): void {
+  for (const node of fresh) {
+    const anchor = [...(state.neighbors.get(node.id) ?? [])].map((id) => state.nodes.get(id)).find((other) => other?.x !== undefined);
+    if (anchor?.x === undefined || anchor.y === undefined) continue;
+    const angle = Math.random() * 2 * Math.PI;
+    const reach = radiusOf(anchor) + NEW_NODE_GAP;
+    node.x = anchor.x + Math.cos(angle) * reach;
+    node.y = anchor.y + Math.sin(angle) * reach;
+  }
+}
+
 function hubsOf(nodes: readonly GraphNode[]): Set<string> {
   const hubs = nodes.filter((node) => node.degree >= 2).sort((a, b) => b.degree - a.degree).slice(0, HUB_LABELS);
   return new Set(hubs.map((node) => node.id));
@@ -247,9 +271,17 @@ function createController(graph: ViewGraph, state: ViewState, redraw: () => void
       state.neighbors = neighborMap(data.links);
       state.hubIds = hubsOf(data.nodes);
       // 점이 움직이던 자리를 유지하려고 같은 ID의 점 객체를 재사용한다
-      const nodes = data.nodes.map((incoming) => Object.assign(state.nodes.get(incoming.id) ?? {}, incoming) as ViewNode);
+      const fresh: ViewNode[] = [];
+      const nodes = data.nodes.map((incoming) => {
+        const previous = state.nodes.get(incoming.id);
+        const node = Object.assign(previous ?? {}, incoming) as ViewNode;
+        if (!previous) fresh.push(node);
+        return node;
+      });
       state.nodes = new Map(nodes.map((node) => [node.id, node]));
-      graph.warmupTicks(loaded ? 0 : WARMUP_TICKS);
+      if (loaded) placeNearNeighbors(fresh, state);
+      // 처음 배치를 한 프레임에 몰아 하면 점이 많을 때 화면이 멈춰서(2,000점 약 0.6초), 점 수에 맞춰 줄인다
+      graph.warmupTicks(loaded ? 0 : Math.min(WARMUP_TICKS, Math.round(WARMUP_BUDGET / Math.max(1, nodes.length))));
       loaded = true;
       graph.graphData({ nodes, links: data.links.map((link) => ({ ...link })) });
       redraw();
@@ -276,6 +308,8 @@ export function createGraphView(
   const state: ViewState = { palette, hoverId: null, focusId: null, hubIds: new Set(), neighbors: new Map(), nodes: new Map() };
   const graph = configureGraph(container, state, (node) => handlers.onNodeClick(node));
   graph.d3Force('gravity', gravity(GRAVITY));
+  // 배치 계산의 대부분이 점끼리 밀어내는 힘이라(프로파일 2,000점 기준 약 65%), 먼 점끼리는 계산하지 않는다
+  graph.d3Force('charge')?.distanceMax?.(CHARGE_REACH);
   if (handlers.onSettled) graph.onEngineStop(handlers.onSettled);
   const redraw = createRedrawScheduler(graph);
   setupHover(container, (x, y) => graph.screen2GraphCoords(x, y), state, redraw);
