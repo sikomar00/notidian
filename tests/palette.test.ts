@@ -49,6 +49,8 @@ test('DB별 색: 처음 알게 된 두 DB에 색, 나머지는 기타 DB, 새 DB
   const four = databaseColors(['a', 'b', 'c', 'd'], LIGHT);
   assert.deepEqual([four.get('a'), four.get('b'), four.get('c'), four.get('d')], [...LIGHT.databases, LIGHT.otherDatabase, LIGHT.otherDatabase]);
   assert.deepEqual([two.get('a'), two.get('b')], [four.get('a'), four.get('b')]);
+  // 가는 선 색은 보통 선보다 대비가 커야 한다(가는 선은 테두리가 흐려진다)
+  for (const palette of [LIGHT, DARK]) assert.ok(contrastRatio(palette.thinLink, palette.background) > contrastRatio(palette.link, palette.background), '가는 선');
   // 첫 DB는 DB별 색을 켜도 원래 DB 색 그대로, 기타 DB는 "읽을 수 없음"과 다른 색
   for (const palette of [LIGHT, DARK]) {
     assert.equal(palette.databases[0], palette.dbItem);
