@@ -178,3 +178,21 @@ export async function filtersAndGroups(browser: Browser, check: Check): Promise<
   await expect(check, page, '외톨이 숨기기: 연결 없는 페이지가 목록에서 사라짐', `${zeroRows} === 0 && document.getElementById('list-body').rows.length === ${40 - before}`, `[${zeroRows}, document.getElementById('list-body').rows.length, ${before}]`);
   check('외톨이 숨기기: 점검 데이터에 외톨이가 있었음(점검이 의미 있는지)', before > 0, before);
 }
+
+/** 토큰 보안: 메모리에만 두기(켜고 끄면 옮겨짐)와 토큰만 지우기(연결 지도는 남음)(P2-6). 점검용 가짜 토큰만 쓴다. */
+export async function tokenSecurity(browser: Browser, check: Check): Promise<void> {
+  const page = await browser.open(browser.ext('options.html'));
+  await waitFor(page, `document.getElementById('steps')?.children.length > 0`);
+  const where = `Promise.all([chrome.storage.session.get('token'), chrome.storage.local.get('token')]).then(([s, l]) => (s.token ? 'session' : '') + (l.token ? 'local' : '') || 'none')`;
+  await expect(check, page, '토큰: 처음엔 디스크(local)에만', `${where}.then((w) => w === 'local')`, where);
+  await page.run(`document.getElementById('token-session').click()`);
+  await expect(check, page, '토큰: "브라우저를 닫으면 지우기"를 켜면 메모리(session)로 옮겨지고 디스크에는 없음', `${where}.then((w) => w === 'session')`, where);
+  await expect(check, page, '토큰: 메모리에 있어도 토큰이 있는 것으로 봄(시작 버튼 켜짐)', `!document.getElementById('index-start').disabled`);
+  await page.run(`document.getElementById('token-session').click()`);
+  await expect(check, page, '토큰: 끄면 다시 디스크로', `${where}.then((w) => w === 'local')`, where);
+  const graph = await openGraph(browser);
+  await page.run(`window.confirm = () => true; document.getElementById('token-clear').click()`);
+  await expect(check, page, '토큰 지우기: 두 저장소에서 모두 사라짐', `${where}.then((w) => w === 'none')`, where);
+  await expect(check, page, '토큰 지우기: 연결 지도는 남고 시작 버튼은 꺼지며 1단계로', `${STEPS} === 'active,todo,todo' && document.getElementById('index-start').disabled && chrome.storage.local.get('progress').then((p) => p.progress.phase === 'done')`, STEPS);
+  await expect(check, graph, '토큰 지우기: 열려 있던 그래프 화면도 다시 만들기 버튼을 끔', `document.getElementById('reindex').disabled && !document.getElementById('reindex-hint').hidden`);
+}
