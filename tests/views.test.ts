@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { computeSteps } from '../src/extension/options/steps.ts';
 import { applyFilters, SHOW_ALL } from '../src/graph/filter.ts';
-import { buildRows } from '../src/graph/rows.ts';
+import { buildRows, linkedPages } from '../src/graph/rows.ts';
 import type { GraphData } from '../src/graph/types.ts';
 import { probeAccess } from '../src/notion/endpoints.ts';
 import { FakeNotion, uid, WORKSPACE } from './helpers/fakeNotion.ts';
@@ -55,4 +55,18 @@ test('접근 범위 확인: 검색 한 번으로 읽을 수 있는 페이지 수
   assert.deepEqual(await probeAccess(fake.request), { count: 3, more: false });
   fake.searchPageSize = 2;
   assert.deepEqual(await probeAccess(fake.request), { count: 2, more: true });
+});
+
+test('연결 패널: 받은·보낸 상대(양방향은 양쪽, 하위 페이지 선은 제외)가 목록 행의 수와 같다', () => {
+  const ids = (id: string) => {
+    const linked = linkedPages(data, id);
+    return [linked.incoming.map((n) => n.id), linked.outgoing.map((n) => n.id)];
+  };
+  assert.deepEqual(ids('b'), [['a'], ['a', 'c']]);
+  assert.deepEqual(ids('a'), [['b'], ['b']]);
+  assert.deepEqual(ids('d'), [[], []]);
+  for (const row of buildRows(data)) {
+    const linked = linkedPages(data, row.id);
+    assert.deepEqual([linked.incoming.length, linked.outgoing.length], [row.received, row.sent]);
+  }
 });
