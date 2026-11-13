@@ -30,6 +30,13 @@ export async function optionsAndSeed(browser: Browser, check: Check): Promise<vo
   check('안전: 점검 중 api.notion.com에 닿지 않음', String(reached).startsWith('blocked'), reached);
   await expect(check, page, '설정: 토큰 없으면 1단계가 지금 할 차례', `${STEPS} === 'active,todo,todo'`, STEPS);
   await expect(check, page, '설정: 토큰 없으면 시작 버튼 꺼짐', `document.getElementById('index-start').disabled`);
+  await expect(check, page, '설정: 데이터·개인정보 안내가 있음', `document.getElementById('privacy-title')?.textContent === '4. 데이터는 어디에 있나요'`);
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: false });
+  await expect(check, page, '설정: 360px 가로 넘침 없음', NO_HSCROLL);
+  await page.shot('options-360');
+  await page.run(`document.getElementById('privacy-title').scrollIntoView()`);
+  await page.shot('options-privacy-360');
+  await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await page.shot('options-first');
   await page.run(SEED_SAMPLE);
   await expect(check, page, '설정: 토큰·지도 있으면 3단계가 지금 할 차례', `${STEPS} === 'done,done,active'`, STEPS);

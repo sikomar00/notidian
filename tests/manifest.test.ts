@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,9 @@ const manifest = JSON.parse(readFileSync(join(root, 'public', 'manifest.json'), 
   host_permissions: string[];
   content_scripts: { matches: string[] }[];
   web_accessible_resources: { matches: string[] }[];
+  description: string;
+  icons: Record<string, string>;
+  action: { default_icon: Record<string, string> };
 };
 
 function sourceFiles(dir: string): string[] {
@@ -41,4 +44,17 @@ test('네트워크 요청은 src/notion/http.ts 한 곳에서만 보낸다(NF-4,
 test('콘솔에 아무것도 찍지 않는다 — 토큰이 로그에 새지 않게(NF-4)', () => {
   const offenders = sourceFiles(join(root, 'src')).filter((file) => /\bconsole\./.test(readFileSync(file, 'utf8')));
   assert.deepEqual(offenders, []);
+});
+
+test('아이콘 파일이 모두 있고, 설명은 웹스토어 한도(132자) 안이다(P1-8)', () => {
+  for (const path of [...Object.values(manifest.icons), ...Object.values(manifest.action.default_icon)]) {
+    assert.ok(existsSync(join(root, 'public', path)), path);
+  }
+  assert.deepEqual(Object.keys(manifest.icons), ['16', '32', '48', '128']);
+  // PNG 머리(IHDR)의 가로·세로가 매니페스트에 적힌 크기와 같아야 한다
+  for (const [size, path] of Object.entries(manifest.icons)) {
+    const png = readFileSync(join(root, 'public', path));
+    assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [Number(size), Number(size)], path);
+  }
+  assert.ok(manifest.description.length <= 132, String(manifest.description.length));
 });
