@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- 그래프 화면과 같은 모양·색: 파란 원 = 페이지, 주황 네모 = DB 항목, 선 = 연결 -->
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="#ffffff" stroke="#d0d5dd" stroke-width="4"/>
+  <g stroke="#4b5563" stroke-width="10" stroke-linecap="round">
+    <line x1="36" y1="42" x2="92" y2="42"/>
+    <line x1="36" y1="42" x2="64" y2="90"/>
+    <line x1="92" y1="42" x2="64" y2="90"/>
+  </g>
+  <circle cx="36" cy="42" r="17" fill="#2563eb"/>
+  <circle cx="92" cy="42" r="17" fill="#2563eb"/>
+  <rect x="47" y="73" width="34" height="34" rx="4" fill="#c2410c"/>
+</svg>
