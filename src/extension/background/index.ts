@@ -1,3 +1,4 @@
+import './autoRefresh.ts';
 import './dispatch.ts';
 import type { Message } from '../messages.ts';
 import { handleIndexCommand, saveToken } from './indexer.ts';

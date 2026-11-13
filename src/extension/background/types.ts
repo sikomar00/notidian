@@ -41,6 +41,10 @@ export interface Progress {
   discovered: number;
   waitingUntil?: number;
   lastError?: string;
+  /** 지도를 마지막으로 다 만든 시각(ms). "N분 전 갱신"에 쓴다. 다시 만드는 동안에도 남겨 둔다 */
+  finishedAt?: number;
+  /** 자동 다시 만들기가 시작한 실행인지. 이때는 화면 읽기 프로그램에 알리지 않고, 멈추면 다음 주기에 이어서 한다 */
+  auto?: boolean;
 }
 
 export const IDLE_PROGRESS: Progress = { phase: 'idle', read: 0, discovered: 0 };

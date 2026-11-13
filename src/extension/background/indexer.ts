@@ -17,6 +17,11 @@ const RATE_LIMIT_MESSAGE = 'Notion이 요청을 잠시 막았어요. 1~2분 뒤 
 const store = openIdbStore();
 let running = false;
 let stopRequested = false;
+// 다시 만드는 동안 진행 상태를 새로 써도 마지막 완성 시각과 자동 실행 여부는 남긴다
+const carried = (progress: Progress): Pick<Progress, 'finishedAt' | 'auto'> => ({
+  ...(progress.finishedAt === undefined ? {} : { finishedAt: progress.finishedAt }),
+  ...(progress.auto ? { auto: true } : {}),
+});
 
 async function readProgress(): Promise<Progress> {
   const { progress } = await chrome.storage.local.get('progress');
@@ -37,10 +42,12 @@ async function finish(outcome: CrawlOutcome): Promise<void> {
   if (outcome.kind === 'budget') return;
   await chrome.alarms.clear(ALARM);
   const { read, discovered } = await store.counts();
-  if (outcome.kind === 'done') await writeProgress({ phase: 'done', read, discovered });
-  else if (outcome.kind === 'stopped') await writeProgress({ phase: 'paused', read, discovered });
-  else if (outcome.reason === 'rate-limit') await writeProgress({ phase: 'paused', read, discovered, lastError: RATE_LIMIT_MESSAGE });
-  else await writeProgress({ phase: 'error', read, discovered, lastError: outcome.message });
+  const keep = carried(await readProgress());
+  if (outcome.kind === 'done') await writeProgress({ ...keep, phase: 'done', read, discovered, finishedAt: Date.now() });
+  // 사용자가 멈춘 것은 다음 주기에 이어 하지 않는다
+  else if (outcome.kind === 'stopped') await writeProgress({ ...keep, auto: false, phase: 'paused', read, discovered });
+  else if (outcome.reason === 'rate-limit') await writeProgress({ ...keep, phase: 'paused', read, discovered, lastError: RATE_LIMIT_MESSAGE });
+  else await writeProgress({ ...keep, phase: 'error', read, discovered, lastError: outcome.message });
 }
 
 /**
@@ -57,6 +64,7 @@ async function runChunk(): Promise<void> {
       return;
     }
     await chrome.alarms.create(ALARM, { delayInMinutes: ALARM_MINUTES, periodInMinutes: ALARM_MINUTES });
+    const keep = carried(await readProgress());
     const request = withRetry(createNotionClient(token), {
       onWait: (until) => void readProgress().then((progress) => writeProgress({ ...progress, waitingUntil: until })),
     });
@@ -66,7 +74,7 @@ async function runChunk(): Promise<void> {
         store,
         now: Date.now,
         isStopped: () => stopRequested,
-        onProgress: (read, discovered) => writeProgress({ phase: 'running', read, discovered }),
+        onProgress: (read, discovered) => writeProgress({ ...keep, phase: 'running', read, discovered }),
       },
       Date.now() + BUDGET_MS,
     );
@@ -76,13 +84,13 @@ async function runChunk(): Promise<void> {
   }
 }
 
-/** 처음이든 "다시 색인"이든 시작한다. 중단·오류로 멈춘 색인이 있으면 처음부터가 아니라 이어서 한다. */
-async function startIndex(): Promise<void> {
+/** 처음이든 "다시 색인"이든 시작한다. 중단·오류로 멈춘 색인이 있으면 처음부터가 아니라 이어서 한다. `auto`는 자동 다시 만들기가 시작했는지. */
+export async function startIndex(auto = false): Promise<void> {
   if (running) return;
   const [progress, state] = await Promise.all([readProgress(), store.getCrawl()]);
   const resumable = state !== undefined && state.phase !== 'done' && (progress.phase === 'paused' || progress.phase === 'error');
   if (!resumable) await beginCrawl(store, Date.now);
-  await writeProgress({ ...(await store.counts()), phase: 'running' });
+  await writeProgress({ ...carried(progress), auto, ...(await store.counts()), phase: 'running' });
   stopRequested = false;
   void runChunk();
 }
@@ -90,7 +98,7 @@ async function startIndex(): Promise<void> {
 async function stopIndex(): Promise<void> {
   stopRequested = true;
   await chrome.alarms.clear(ALARM);
-  if (!running) await writeProgress({ ...(await readProgress()), phase: 'paused' });
+  if (!running) await writeProgress({ ...(await readProgress()), auto: false, phase: 'paused' });
 }
 
 async function clearIndex(): Promise<void> {

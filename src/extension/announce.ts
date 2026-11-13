@@ -10,7 +10,8 @@ export function createAnnouncer(liveRegion: HTMLElement, gapMs = 15_000, now: ()
   let previous: ProgressPhase | undefined;
   let lastAt = -Infinity;
   return (progress) => {
-    if (shouldAnnounce(previous, progress.phase, now() - lastAt, gapMs)) {
+    // 사용자가 요청하지 않은 자동 다시 만들기는 알리지 않는다(30분마다 읽어 주면 방해가 된다)
+    if (!progress.auto && shouldAnnounce(previous, progress.phase, now() - lastAt, gapMs)) {
       liveRegion.textContent = describeProgress(progress, now());
       lastAt = now();
     }
