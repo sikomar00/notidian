@@ -13,6 +13,7 @@ import { byId } from '../dom.ts';
 import { isViewMode } from '../messages.ts';
 import type { Message, ViewMode } from '../messages.ts';
 import { describeProgress, keepTimeFresh } from '../progressText.ts';
+import { hasToken as tokenPresent, tokenChanged } from '../tokenStore.ts';
 import { renderDatabaseLegend } from './databaseLegend.ts';
 import { renderLinks } from './linksPanel.ts';
 import { followTabs } from './follow.ts';
@@ -351,9 +352,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
     renderProgress(progress);
     scheduleReload(progress.phase === 'running');
   }
-  if (area === 'local' && changes.token) {
-    hasToken = typeof changes.token.newValue === 'string' && changes.token.newValue !== '';
-    renderReindex();
+  if (tokenChanged(changes, area)) {
+    void tokenPresent().then((present) => {
+      hasToken = present;
+      renderReindex();
+    });
   }
   const pageId: unknown = changes.focusPageId?.newValue;
   if (area === 'session' && changes.focusPageId) setCurrentPage(typeof pageId === 'string' ? pageId : null);
@@ -393,11 +396,12 @@ document.addEventListener('keydown', (event) => {
 });
 
 async function init(): Promise<void> {
-  const [local, session] = await Promise.all([
-    chrome.storage.local.get(['progress', 'token', 'databaseNames', 'databaseNamesError']),
+  const [local, session, present] = await Promise.all([
+    chrome.storage.local.get(['progress', 'databaseNames', 'databaseNamesError']),
     chrome.storage.session.get('focusPageId'),
+    tokenPresent(),
   ]);
-  hasToken = typeof local.token === 'string' && local.token !== '';
+  hasToken = present;
   databaseNames = (local.databaseNames as Record<string, string> | undefined) ?? {};
   databaseNamesError = local.databaseNamesError as string | undefined;
   renderProgress((local.progress as Progress | undefined) ?? IDLE_PROGRESS);

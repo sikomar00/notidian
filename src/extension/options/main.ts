@@ -7,6 +7,7 @@ import { byId } from '../dom.ts';
 import type { IndexCommand, Message, SaveTokenReply, TokenKind } from '../messages.ts';
 import { autoRefreshMinutes } from '../autoRefresh.ts';
 import { describeProgress, keepTimeFresh } from '../progressText.ts';
+import { hasToken as tokenPresent, tokenChanged } from '../tokenStore.ts';
 import { computeSteps, STEP_STATE_TEXT } from './steps.ts';
 import { renderUnreadable } from './view.ts';
 
@@ -87,10 +88,11 @@ function renderAutoRefreshError(message: unknown): void {
 }
 
 async function loadInitialState(): Promise<void> {
-  const stored = await chrome.storage.local.get(['token', 'tokenKind', 'progress', 'autoRefreshMinutes', 'autoRefreshError']);
+  const [stored, present] = await Promise.all([chrome.storage.local.get(['tokenKind', 'tokenInSession', 'progress', 'autoRefreshMinutes', 'autoRefreshError']), tokenPresent()]);
+  sessionBox.checked = stored.tokenInSession === true;
   autoRefresh.value = String(autoRefreshMinutes(stored.autoRefreshMinutes));
   renderAutoRefreshError(stored.autoRefreshError);
-  hasToken = typeof stored.token === 'string' && stored.token !== '';
+  hasToken = present;
   byId<HTMLInputElement>('kind-pat').checked = stored.tokenKind === 'pat';
   byId('pat-warning').hidden = stored.tokenKind !== 'pat';
   setProgress((stored.progress as Progress | undefined) ?? IDLE_PROGRESS);
@@ -113,6 +115,30 @@ byId('save-token').addEventListener('click', async () => {
   status.textContent = reply.ok ? savedMessage(reply) : reply.message;
 });
 
+// 토큰 보안(P2-6): 브라우저를 닫으면 지우기(메모리에만 두기), 토큰만 지우기. 실제로 옮기거나 지우는 일은 서비스 워커가 한다
+const sessionBox = byId<HTMLInputElement>('token-session');
+async function tokenCommand(message: Message, failure: string): Promise<boolean> {
+  const reply = await send<{ ok: boolean; message?: string }>(message);
+  if (!reply.ok) byId('token-status').textContent = `${failure}: ${reply.message ?? ''}`;
+  return reply.ok;
+}
+// 옮기는 동안은 다시 못 누르게 하고, 실패하면 실제 저장 상태로 되돌린다
+sessionBox.addEventListener('change', () => {
+  sessionBox.disabled = true;
+  void tokenCommand({ type: 'token-session', sessionOnly: sessionBox.checked }, '토큰 저장 방식을 바꾸지 못했어요')
+    .then(async (ok) => {
+      if (!ok) sessionBox.checked = (await chrome.storage.local.get('tokenInSession')).tokenInSession === true;
+    })
+    .finally(() => {
+      sessionBox.disabled = false;
+    });
+});
+byId('token-clear').addEventListener('click', () => {
+  if (window.confirm('저장된 토큰을 지울까요? 연결 지도는 남고, 다시 만들거나 자동으로 다시 만들려면 토큰을 다시 넣어야 해요.')) {
+    void tokenCommand({ type: 'clear-token' }, '토큰을 지우지 못했어요');
+  }
+});
+
 async function runCommand(command: IndexCommand): Promise<void> {
   await send({ type: 'index', command });
   await refreshUnreadable();
@@ -129,12 +155,15 @@ graphButton.addEventListener('click', () => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local') return;
-  if (changes.autoRefreshError) renderAutoRefreshError(changes.autoRefreshError.newValue);
-  if (changes.token) {
-    hasToken = typeof changes.token.newValue === 'string' && changes.token.newValue !== '';
-    render();
+  if (tokenChanged(changes, area)) {
+    void tokenPresent().then((present) => {
+      hasToken = present;
+      render();
+    });
   }
+  if (area !== 'local') return;
+  if (changes.tokenInSession) sessionBox.checked = changes.tokenInSession.newValue === true;
+  if (changes.autoRefreshError) renderAutoRefreshError(changes.autoRefreshError.newValue);
   const next = changes.progress?.newValue as Progress | undefined;
   if (!next) return;
   setProgress(next);
