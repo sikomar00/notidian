@@ -1,3 +1,4 @@
+import { createAnnouncer } from '../announce.ts';
 import { openIdbStore } from '../background/idbStore.ts';
 import { IDLE_PROGRESS } from '../background/types.ts';
 import type { Progress } from '../background/types.ts';
@@ -12,6 +13,9 @@ const startButton = byId<HTMLButtonElement>('index-start');
 const stopButton = byId<HTMLButtonElement>('index-stop');
 const clearButton = byId<HTMLButtonElement>('index-clear');
 const graphButton = byId<HTMLButtonElement>('open-graph');
+const announce = createAnnouncer(byId('progress-live'));
+let progress: Progress = IDLE_PROGRESS;
+let hasToken = false;
 
 const selectedKind = (): TokenKind => (byId<HTMLInputElement>('kind-pat').checked ? 'pat' : 'internal');
 
@@ -20,17 +24,28 @@ async function send<T>(message: Message): Promise<T> {
 }
 
 function startLabel(phase: Progress['phase']): string {
-  if (phase === 'paused' || phase === 'error') return '이어서 색인';
-  return phase === 'done' ? '다시 색인' : '색인 시작';
+  if (phase === 'paused' || phase === 'error') return '이어서 만들기';
+  return phase === 'done' ? '다시 만들기' : '연결 지도 만들기';
 }
 
-function renderProgress(progress: Progress): void {
+// 토큰이 없으면 눌러도 오류만 나므로 시작 버튼을 끄고 이유를 보여 준다
+function render(): void {
   byId('progress').textContent = describeProgress(progress);
   const running = progress.phase === 'running';
   startButton.textContent = startLabel(progress.phase);
-  startButton.disabled = running;
+  startButton.disabled = running || !hasToken;
+  byId('start-hint').hidden = hasToken;
   stopButton.disabled = !running;
   graphButton.disabled = progress.phase === 'idle';
+  byId('token-status').textContent ||= hasToken
+    ? '토큰이 저장돼 있어요. 바꾸려면 새 토큰을 넣고 다시 저장하세요.'
+    : '아직 토큰이 없어요.';
+}
+
+function setProgress(next: Progress): void {
+  progress = next;
+  announce(next);
+  render();
 }
 
 async function refreshUnreadable(): Promise<void> {
@@ -39,11 +54,10 @@ async function refreshUnreadable(): Promise<void> {
 
 async function loadInitialState(): Promise<void> {
   const stored = await chrome.storage.local.get(['token', 'tokenKind', 'progress']);
-  const hasToken = typeof stored.token === 'string' && stored.token !== '';
+  hasToken = typeof stored.token === 'string' && stored.token !== '';
   byId<HTMLInputElement>('kind-pat').checked = stored.tokenKind === 'pat';
   byId('pat-warning').hidden = stored.tokenKind !== 'pat';
-  byId('token-status').textContent = hasToken ? '토큰이 저장되어 있습니다. 바꾸려면 새 토큰을 넣고 다시 저장하세요.' : '아직 토큰이 없습니다.';
-  renderProgress((stored.progress as Progress | undefined) ?? IDLE_PROGRESS);
+  setProgress((stored.progress as Progress | undefined) ?? IDLE_PROGRESS);
   await refreshUnreadable();
 }
 
@@ -56,10 +70,11 @@ for (const radio of document.querySelectorAll<HTMLInputElement>('input[name="kin
 byId('save-token').addEventListener('click', async () => {
   const input = byId<HTMLInputElement>('token');
   const status = byId('token-status');
-  status.textContent = 'Notion에 확인하는 중…';
+  status.textContent = 'Notion에 확인하는 중이에요…';
   const reply = await send<SaveTokenReply>({ type: 'save-token', token: input.value, kind: selectedKind() });
+  input.setAttribute('aria-invalid', String(!reply.ok));
   if (reply.ok) input.value = '';
-  status.textContent = reply.ok ? '토큰을 확인하고 저장했습니다.' : reply.message;
+  status.textContent = reply.ok ? '토큰을 저장했어요. 이제 "연결 지도 만들기"를 눌러 주세요.' : reply.message;
 });
 
 async function runCommand(command: IndexCommand): Promise<void> {
@@ -70,7 +85,7 @@ async function runCommand(command: IndexCommand): Promise<void> {
 startButton.addEventListener('click', () => void runCommand('start'));
 stopButton.addEventListener('click', () => void runCommand('stop'));
 clearButton.addEventListener('click', () => {
-  if (window.confirm('저장된 색인을 지웁니다. 토큰은 지워지지 않습니다. 계속할까요?')) void runCommand('clear');
+  if (window.confirm('저장된 연결 지도를 지울까요? 토큰은 남고, 다시 만들려면 몇 분 걸려요.')) void runCommand('clear');
 });
 // 설정 화면에서 여는 그래프에는 "지금 보던 페이지"가 없으므로 이전 클릭의 강조를 지우고, 이미 열린 전체 탭은 재사용한다
 graphButton.addEventListener('click', () => {
@@ -78,10 +93,15 @@ graphButton.addEventListener('click', () => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  const progress = changes.progress?.newValue as Progress | undefined;
-  if (area !== 'local' || !progress) return;
-  renderProgress(progress);
-  if (progress.phase !== 'running') void refreshUnreadable();
+  if (area !== 'local') return;
+  if (changes.token) {
+    hasToken = typeof changes.token.newValue === 'string' && changes.token.newValue !== '';
+    render();
+  }
+  const next = changes.progress?.newValue as Progress | undefined;
+  if (!next) return;
+  setProgress(next);
+  if (next.phase !== 'running') void refreshUnreadable();
 });
 
 void loadInitialState();
