@@ -42,6 +42,12 @@
       th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid color-mix(in srgb, var(--text) 25%, var(--bg)); }
       th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
       td button { white-space: nowrap; }
+      /* 선택한 페이지의 받은·보낸 연결. 옆 패널처럼 좁으면 위아래로 쌓이고, 목록이 길면 그 안에서 스크롤한다 */
+      .links { flex-basis: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(14em, 1fr)); gap: 4px 16px; }
+      .links h2 { font-size: 13px; margin: 0; }
+      .links .hint { font-size: 12px; margin: 0 0 2px; opacity: 0.8; }
+      .links ul { list-style: none; margin: 0; padding: 0; max-height: 6.5em; overflow: auto; }
+      .links li button { border: none; padding: 1px 4px; text-align: left; text-decoration: underline; }
       .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     </style>
   </head>
@@ -74,9 +80,13 @@
         <span id="reindex-hint" hidden>먼저 설정에서 토큰을 저장해 주세요.</span>
       </div>
       <div id="selection" class="row" role="region" aria-label="선택한 페이지" hidden>
-        <span>선택한 페이지: <strong id="sel-title"></strong> <span id="sel-counts"></span></span>
+        <span>선택한 페이지: <strong id="sel-title"></strong></span>
         <button id="sel-open" type="button">Notion에서 열기</button>
         <button id="sel-clear" type="button">선택 해제</button>
+        <div class="links">
+          <section aria-labelledby="in-title"><h2 id="in-title">받은 연결</h2><p class="hint">이 페이지를 가리키는 페이지</p><ul id="sel-in"></ul></section>
+          <section aria-labelledby="out-title"><h2 id="out-title">보낸 연결</h2><p class="hint">이 페이지가 가리키는 페이지</p><ul id="sel-out"></ul></section>
+        </div>
       </div>
       <div id="notice" role="status" aria-live="polite"></div>
     </header>

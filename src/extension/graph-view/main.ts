@@ -1,7 +1,7 @@
 import { buildGraph } from '../../graph/buildGraph.ts';
 import { applyFilters, SHOW_ALL } from '../../graph/filter.ts';
 import type { KindFilter } from '../../graph/filter.ts';
-import { buildRows } from '../../graph/rows.ts';
+import { buildRows, linkedPages } from '../../graph/rows.ts';
 import type { NodeRow } from '../../graph/rows.ts';
 import type { GraphData, PageRecord, RawLink } from '../../graph/types.ts';
 import { pageUrl } from '../../notion/urlToPageId.ts';
@@ -13,6 +13,7 @@ import { byId } from '../dom.ts';
 import { isViewMode } from '../messages.ts';
 import type { Message, ViewMode } from '../messages.ts';
 import { describeProgress } from '../progressText.ts';
+import { renderLinks } from './linksPanel.ts';
 import { createListView } from './listview.ts';
 import { openPage, switchMode } from './navigate.ts';
 import { applyPaletteVars, currentPalette } from './palette.ts';
@@ -47,6 +48,8 @@ let rowsById = new Map<string, NodeRow>();
 let pagesById = new Map<string, PageRecord>();
 let focusId: string | null = null;
 let focusApplied = false;
+// 아이콘으로 연 지금 페이지를 한 번만 자동으로 골라 받은·보낸 연결을 보여 준다(그 뒤 사용자가 고른 것은 덮어쓰지 않는다)
+let pickCurrent = false;
 let selectedId: string | null = null;
 // 사용자가 직접 확대·이동하기 전까지는 점이 늘거나 배치가 멈출 때마다 전체가 보이게 맞춘다
 let autoFit = true;
@@ -56,12 +59,6 @@ let phase: ProgressPhase = 'idle';
 let lastReload = 0;
 let reloadTicket = 0;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
-
-function publishReport(): void {
-  const size = `${container.clientWidth}x${container.clientHeight}`;
-  const report = `mode=${mode}, 점 ${lastGraph.nodes.length}개·선 ${lastGraph.links.length}개, 화면 크기=${size}, 그래프 만듦=${view ? '예' : '아니오'}, 현재 페이지=${focusId ? '있음' : '없음'}`;
-  void chrome.storage.session.set({ graphReport: { at: Date.now(), report } });
-}
 
 function openById(id: string): void {
   void openPage(mode, pageUrl(id, pagesById.get(id)?.url)).catch((error: unknown) => {
@@ -83,7 +80,7 @@ function renderSelection(): void {
   const row = selectedId === null ? undefined : rowsById.get(selectedId);
   byId('selection').hidden = row === undefined;
   byId('sel-title').textContent = row?.title ?? '';
-  byId('sel-counts').textContent = row ? `받은 연결 ${row.received}개 · 보낸 연결 ${row.sent}개` : '';
+  renderLinks(row ? linkedPages(lastGraph, row.id) : undefined, select);
 }
 
 const searchInput = byId<HTMLInputElement>('search');
@@ -139,11 +136,14 @@ function rebuild(): void {
   if (listMode) list.setRows(rows);
   search.setItems(lastGraph.nodes.filter((node) => !node.unreadable));
   renderEmpty();
+  if (pickCurrent && focusId !== null && rowsById.has(focusId)) {
+    pickCurrent = false;
+    selectedId = focusId;
+  }
   if (selectedId !== null && !rowsById.has(selectedId)) select(null);
   else renderSelection();
   const target = ensureView();
   if (target) applyData(target);
-  publishReport();
 }
 
 async function reload(): Promise<void> {
@@ -254,7 +254,6 @@ new ResizeObserver(() => {
   target.resize(container.clientWidth, container.clientHeight);
   if (created) applyData(target);
   else if (autoFit) target.fit();
-  publishReport();
 }).observe(container);
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -270,12 +269,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
   const pageId: unknown = changes.focusPageId?.newValue;
   if (area === 'session' && changes.focusPageId) {
     focusId = typeof pageId === 'string' ? pageId : null;
+    pickCurrent = focusId !== null;
     focusApplied = false;
     // 강조할 페이지가 없어지면 다시 전체가 보이게 맞춘다
     if (focusId === null) autoFit = true;
     view?.focusNode(null);
-    if (view) applyData(view);
-    publishReport();
+    // 새 지금 페이지를 고르고 그 연결을 보여 주려면 선택 막대까지 다시 그려야 한다
+    rebuild();
   }
 });
 
@@ -293,6 +293,7 @@ async function init(): Promise<void> {
   hasToken = typeof local.token === 'string' && local.token !== '';
   renderProgress((local.progress as Progress | undefined) ?? IDLE_PROGRESS);
   focusId = typeof session.focusPageId === 'string' ? session.focusPageId : null;
+  pickCurrent = focusId !== null;
   await reload();
 }
 
