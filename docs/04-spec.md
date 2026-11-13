@@ -48,7 +48,7 @@ tests/          테스트(`node --test`)
 | `viewMode` | `"side"` \| `"center"` \| `"full"` (기본 `side`) |
 | `progress` | `{ phase, read, discovered, waitingUntil?, lastError? }` — 화면이 보는 진행 상태. `phase`는 `idle/running/paused/done/error` |
 
-**`chrome.storage.session`** — 브라우저를 닫으면 사라지는 값: `originTabId`, `focusPageId`(아이콘을 누른 순간의 Notion 탭과 그 페이지 ID), `fullTabId`(전체 모드 탭). 점검용으로 `lastClick`(마지막 아이콘 클릭의 모드·콜드 스타트 여부·결과)과 `graphReport`(그래프 화면의 점·선 수와 화면 크기)도 둔다. 확장을 새로고침하면 지워진다.
+**`chrome.storage.session`** — 브라우저를 닫으면 사라지는 값: `originTabId`, `focusPageId`(아이콘을 누른 순간의 Notion 탭과 그 페이지 ID), `fullTabId`(전체 모드 탭). 확장을 새로고침하면 지워진다. (시험 때 쓰던 점검용 `lastClick`·`graphReport`는 시험 코드와 함께 지웠다)
 
 **IndexedDB `notidian`** — 색인 본체. **본문 글은 저장하지 않는다**(읽는 동안 메모리에서만 쓰고 버린다)
 | 저장소 | 키 | 내용 |
@@ -132,7 +132,7 @@ tests/          테스트(`node --test`)
 
 **모드 전환(S2-1)**: 버튼 클릭이 사용자 동작이라 사이드 패널을 열 수 있다. `viewMode`를 저장하고, 새 컨테이너를 연 뒤 현재 컨테이너를 닫는다(중앙은 `close-overlay` 메시지, 사이드는 `sidePanel.close`, 전체는 현재 탭 닫기). 중앙 창으로 바꾸려면 Notion 탭 번호(`originTabId`)가 있어야 해서, Notion 페이지에서 아이콘을 눌러 연 적이 없으면 "Notion 페이지에서 Notidian 아이콘을 눌러 중앙 창을 여세요"를 보여 준다. 실패하면 이유를 화면 상단에 알린다.
 
-**구현 위치(구조 보충)**: 보기 모드를 여는 공용 코드는 `src/extension/containers.ts`(사이드 패널·오버레이·전체 탭), 화면 요소 찾기는 `dom.ts`, 메시지 형식은 `messages.ts`, 진행 문구는 `progressText.ts`(설정 화면과 그래프 상단이 함께 씀), 설정 화면은 `options/`, 그래프 화면은 `graph-view/{main,render,search,navigate,palette}.ts`다. 시험 때 쓴 `spike.html`과 `spike/`, 서비스 워커의 `relay.ts`는 임시이고 시험이 끝나면 지운다.
+**구현 위치(구조 보충)**: 보기 모드를 여는 공용 코드는 `src/extension/containers.ts`(사이드 패널·오버레이·전체 탭), 화면 요소 찾기는 `dom.ts`, 메시지 형식은 `messages.ts`, 진행 문구는 `progressText.ts`(설정 화면과 그래프 상단이 함께 씀), 설정 화면은 `options/`, 그래프 화면은 `graph-view/{main,render,search,navigate,palette}.ts`다. 시험 때 쓴 `spike.html`·`spike/`·`relay.ts`는 사용자 QA를 마친 뒤 지웠다(2026-11-13). 아이콘을 눌러도 그래프를 열지 못하면 아이콘에 "!"와 이유를 남긴다.
 
 **그리기(`force-graph`)**
 - 크기: `force-graph`는 만들 때의 크기만 쓰고 자동으로 맞추지 않는다. 사이드 패널은 처음 크기가 0이었다(시험 S-6). 컨테이너 크기가 0보다 커진 뒤에 만들고 `ResizeObserver`로 크기를 맞춘다.
