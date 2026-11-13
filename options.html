@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Notidian 설정</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 720px; }
+      fieldset { margin: 16px 0; padding: 12px 16px; }
+      legend { font-weight: 600; }
+      button, input { font: inherit; margin: 2px 4px 2px 0; }
+      button { padding: 6px 12px; cursor: pointer; }
+      button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid Highlight; outline-offset: 2px; }
+      input[type="password"] { width: 20em; padding: 4px 6px; }
+      .warning { border: 2px solid currentColor; padding: 8px 12px; font-weight: 600; }
+      .hint { font-size: 13px; opacity: 0.85; }
+      [hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Notidian 설정</h1>
+
+      <fieldset>
+        <legend>1. 토큰</legend>
+        <p>
+          Notion에서 내부 연결(통합)을 만들고 <b>콘텐츠 읽기만</b> 켠 뒤, 읽을 상위 페이지를 그 연결에 추가하세요.
+          만드는 법은 <a href="https://developers.notion.com/guides/connections-and-tokens/internal-connections" target="_blank" rel="noreferrer">공식 안내</a>를 따릅니다.
+        </p>
+        <p>
+          <label><input type="radio" name="kind" id="kind-internal" value="internal" checked /> 내부 연결 토큰 (권장, 읽기만 켤 수 있음)</label><br />
+          <label><input type="radio" name="kind" id="kind-pat" value="pat" /> 개인 접근 토큰(PAT)</label>
+        </p>
+        <p id="pat-warning" class="warning" role="alert" hidden>
+          PAT는 읽기 전용으로 만들 수 없습니다. 이 토큰이 새면 Notion 내용을 수정하거나 지울 수 있습니다. 가능하면 내부 연결 토큰을 쓰세요.
+        </p>
+        <p>
+          <label>토큰 <input id="token" type="password" autocomplete="off" /></label>
+          <button id="save-token" type="button">확인하고 저장</button>
+        </p>
+        <p id="token-status" role="status" aria-live="polite"></p>
+        <p class="hint">토큰은 이 브라우저에만 저장되며 암호화되지 않습니다. 같은 Windows 계정의 다른 프로그램이 읽을 수 있습니다.</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>2. 색인</legend>
+        <p id="progress" role="status" aria-live="polite"></p>
+        <p>
+          <button id="index-start" type="button">색인 시작</button>
+          <button id="index-stop" type="button">중단</button>
+          <button id="index-clear" type="button">캐시 삭제</button>
+        </p>
+        <p class="hint">
+          처음 전체를 읽을 때는 몇 분 걸릴 수 있습니다. 중간에 끊겨도 이어서 읽습니다.
+          Notion 검색이 수십 초 늦게 반영될 수 있어서, 방금 고친 내용은 잠시 뒤에 보일 수 있습니다.
+        </p>
+      </fieldset>
+
+      <fieldset>
+        <legend>3. 읽지 못한 페이지</legend>
+        <p id="unreadable-summary"></p>
+        <ul id="unreadable-list"></ul>
+      </fieldset>
+
+      <p><button id="open-graph" type="button">그래프 열기</button></p>
+    </main>
+    <script type="module" src="/src/extension/options/main.ts"></script>
+  </body>
+</html>

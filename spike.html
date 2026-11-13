@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Notidian 시험 패널(임시)</title>
+    <style>
+      body { font: 14px/1.5 sans-serif; margin: 16px; max-width: 760px; }
+      fieldset { margin: 12px 0; }
+      button, select, input { font: inherit; margin: 2px 4px 2px 0; }
+      pre { background: #f4f4f4; color: #000; padding: 8px; white-space: pre-wrap; min-height: 6em; border: 1px solid #000; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Notidian 시험 패널 (S-1~S-7)</h1>
+      <p>토큰은 여기에만 붙여 넣으세요. 채팅에는 쓰지 마세요. 아래 결과에는 토큰과 페이지 제목이 나오지 않습니다.</p>
+
+      <fieldset>
+        <legend>설정</legend>
+        <label>토큰 <input id="token" type="password" autocomplete="off" size="40" /></label>
+        <button id="save-token" type="button">토큰 저장</button>
+        <br />
+        <label>보기 모드
+          <select id="mode">
+            <option value="side">사이드</option>
+            <option value="center">중앙</option>
+            <option value="full">전체</option>
+          </select>
+        </label>
+        <button id="save-mode" type="button">모드 저장</button>
+      </fieldset>
+
+      <fieldset>
+        <legend>시험</legend>
+        <button id="s1" type="button">S-1 연결 확인</button>
+        <button id="s2" type="button">S-2 페이지 전체 검색</button>
+        <button id="s3" type="button">S-3·S-7 50페이지 읽기</button>
+        <br />
+        <button id="s4-snapshot" type="button">S-4 스냅샷 저장</button>
+        <button id="s4-compare" type="button">S-4 비교</button>
+        <button id="reports" type="button">S-5·S-6 결과 보기</button>
+        <button id="clear" type="button">화면 지우기</button>
+      </fieldset>
+
+      <pre id="out" aria-live="polite"></pre>
+    </main>
+    <script type="module" src="/src/extension/spike/main.ts"></script>
+  </body>
+</html>
+
