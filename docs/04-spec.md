@@ -48,7 +48,7 @@ tests/          테스트(`node --test`)
 | `viewMode` | `"side"` \| `"center"` \| `"full"` (기본 `side`) |
 | `progress` | `{ phase, read, discovered, waitingUntil?, lastError? }` — 화면이 보는 진행 상태. `phase`는 `idle/running/paused/done/error` |
 
-**`chrome.storage.session`** — 브라우저를 닫으면 사라지는 값: `originTabId`, `focusPageId`(아이콘을 누른 순간의 Notion 탭과 그 페이지 ID), `fullTabId`(전체 모드 탭). 확장을 새로고침하면 지워진다. (시험 때 쓰던 점검용 `lastClick`·`graphReport`는 시험 코드와 함께 지웠다)
+**`chrome.storage.session`** — 브라우저를 닫으면 사라지는 값: `originTabId`, `focusPageId`(아이콘을 누른 순간의 Notion 탭과 그 페이지 ID. 아이콘을 누를 때만 바뀐다). 옆 패널은 열려 있는 동안 같은 창의 Notion 탭 이동을 직접 따라간다(`graph-view/follow.ts`, `tabs.onActivated`·`tabs.onUpdated`, tabs 권한 없이 host_permissions로 주소를 읽음). 따라간 페이지는 패널 안에서만 쓰고 `focusPageId`에 쓰지 않아 다른 보기에 영향이 없으며, 가운데 창 전환용 `originTabId`만 그 탭으로 맞춘다, `fullTabId`(전체 모드 탭). 확장을 새로고침하면 지워진다. (시험 때 쓰던 점검용 `lastClick`·`graphReport`는 시험 코드와 함께 지웠다)
 
 **IndexedDB `notidian`** — 색인 본체. **본문 글은 저장하지 않는다**(읽는 동안 메모리에서만 쓰고 버린다)
 | 저장소 | 키 | 내용 |
