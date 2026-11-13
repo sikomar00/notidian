@@ -25,6 +25,8 @@ const error = (status: number, code: string): NotionResponse => ({ status, body:
 export class FakeNotion {
   pages = new Map<string, FakePage>();
   databases = new Set<string>();
+  /** 데이터 소스 ID → 이름. 없으면 404 */
+  dataSources = new Map<string, string>();
   forbidden = new Set<string>();
   searchPageSize = 100;
   calls: string[] = [];
@@ -54,6 +56,10 @@ export class FakeNotion {
     const [, kind = '', id = '', sub = ''] = parts;
     if (kind === 'users') return ok({ object: 'user', type: 'bot' });
     if (kind === 'pages' && parts.length === 3) return this.getPage(id);
+    if (kind === 'data_sources') {
+      const name = this.dataSources.get(id);
+      return name === undefined ? error(404, 'object_not_found') : ok({ object: 'data_source', id, title: [{ plain_text: name }] });
+    }
     if (kind === 'pages' && sub === 'properties') return this.relationItems(id);
     if (kind === 'blocks' && sub === 'children') return this.children(id);
     return error(404, 'object_not_found');

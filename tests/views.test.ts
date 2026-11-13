@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { computeSteps } from '../src/extension/options/steps.ts';
-import { applyFilters, localSubgraph, SHOW_ALL } from '../src/graph/filter.ts';
+import { unknownDatabases } from '../src/extension/background/databaseNames.ts';
+import { buildGraph } from '../src/graph/buildGraph.ts';
+import { applyFilters, hideIsolated, localSubgraph, SHOW_ALL } from '../src/graph/filter.ts';
+import type { PageRecord } from '../src/graph/types.ts';
+import { fetchDataSourceTitle } from '../src/notion/endpoints.ts';
+import { summarizePage } from '../src/notion/pageMapping.ts';
 import { buildRows, linkedPages } from '../src/graph/rows.ts';
 import type { GraphData } from '../src/graph/types.ts';
 import { probeAccess } from '../src/notion/endpoints.ts';
@@ -87,4 +92,37 @@ test('로컬 그래프: 선택한 페이지에서 단계 수만큼 방향 없이
   assert.deepEqual(ids(3), ['a', 'b', 'c', 'd', 'e']);
   assert.equal(localSubgraph(chain, 'b', 1).nodes.find((n) => n.id === 'c')?.degree, 1);
   assert.equal(localSubgraph(chain, 'zz', 1), chain);
+});
+
+test('외톨이 숨기기: 연결이 없는 점만 뺀다(하위 페이지 선은 연결이 아니다)(P2-3)', () => {
+  // d는 하위 페이지 선만 있어서 외톨이, a·b·c는 연결이 있다
+  assert.deepEqual(hideIsolated(data).nodes.map((n) => n.id), ['a', 'b', 'c']);
+  // 지금 페이지·선택한 페이지는 외톨이여도 남긴다
+  assert.deepEqual(hideIsolated(data, ['d', null]).nodes.map((n) => n.id), ['a', 'b', 'c', 'd']);
+  assert.equal(hideIsolated(data).links.some((l) => l.source === 'd' || l.target === 'd'), false);
+});
+
+const record = (id: string, databaseId?: string): PageRecord => ({ id, title: id, kind: databaseId ? 'dbItem' : 'page', url: '', lastEdited: '', status: 'ok', failCount: 0, ...(databaseId ? { databaseId } : {}) });
+
+test('DB별 색 데이터: 페이지 요약·그래프 점에 소속 DB, 이름 모르는 DB만 고른다(P2-3)', () => {
+  const summary = summarizePage({ id: uid(1), parent: { type: 'data_source_id', data_source_id: uid(9) }, properties: {} });
+  assert.equal(summary?.databaseId, uid(9));
+  assert.equal(summary?.kind, 'dbItem');
+  assert.equal(summarizePage({ id: uid(2), parent: WORKSPACE, properties: {} })?.databaseId, undefined);
+  const graph = buildGraph([record('x', 'db1'), record('y')], [], { hierarchy: false });
+  assert.deepEqual(graph.nodes.map((n) => n.group), ['db1', undefined]);
+  const pages = [record('x', 'db1'), record('y', 'db2'), record('z', 'db1'), record('w')];
+  assert.deepEqual(unknownDatabases(pages, {}), ['db1', 'db2']);
+  assert.deepEqual(unknownDatabases(pages, { db1: '할 일' }), ['db2']);
+});
+
+test('DB 이름 읽기: 이름을 돌려주고, 읽을 수 없으면 undefined(P2-3)', async () => {
+  const fake = new FakeNotion();
+  fake.dataSources.set('ds1', '할 일');
+  assert.equal(await fetchDataSourceTitle(fake.request, 'ds1'), '할 일');
+  assert.equal(await fetchDataSourceTitle(fake.request, 'missing'), undefined);
+  assert.deepEqual(fake.calls, ['GET /v1/data_sources/ds1', 'GET /v1/data_sources/missing']);
+  // 일시 오류는 "이름 없음"으로 굳히지 않도록 오류로 올린다
+  fake.inject('/v1/data_sources/ds1', { status: 502, body: { code: 'bad_gateway' } });
+  await assert.rejects(fetchDataSourceTitle(fake.request, 'ds1'), /502/);
 });

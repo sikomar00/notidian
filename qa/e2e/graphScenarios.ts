@@ -145,3 +145,36 @@ export async function autoRefreshSetting(browser: Browser, check: Check): Promis
   await page.run(`chrome.storage.local.set({ progress: { phase: 'done', read: 40, discovered: 40, finishedAt: Date.now() - 5 * 60_000 } })`);
   await expect(check, page, '상태 줄: 마지막 갱신 시각', `document.getElementById('progress').textContent.endsWith('5분 전 갱신')`, `document.getElementById('progress').textContent`);
 }
+
+// 그래프 그림 안에서 이 색(±12)인 픽셀 수
+const pixelsOf = (hex: string): string => `(() => {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt('${hex}'.slice(i, i + 2), 16));
+  const c = document.querySelector('#graph canvas'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let n = 0; for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - r) <= 12 && Math.abs(d[i + 1] - g) <= 12 && Math.abs(d[i + 2] - b) <= 12) n += 1;
+  return n;
+})()`;
+
+/** 보기 옵션: 외톨이 숨기기와 DB별 색(P2-3). */
+export async function filtersAndGroups(browser: Browser, check: Check): Promise<void> {
+  const page = await openGraph(browser);
+  await page.run(`document.querySelector('.options summary').click()`);
+  await expect(check, page, '보기 옵션: 펼치면 세 가지 옵션이 보임', q(`['hierarchy', 'isolated', 'db-colors'].every((id) => $(id).offsetParent !== null)`));
+  await page.shot('view-options');
+  await page.run(`document.getElementById('db-colors').click()`);
+  const legend = `document.getElementById('db-legend').textContent`;
+  await expect(check, page, 'DB별 색: 범례에 처음 두 DB 이름과 기타 DB 1개', `!document.getElementById('db-legend').hidden && ${legend} === '할 일회의록 DB기타 DB 1개'`, legend);
+  await sleep(800);
+  const green = Number(await page.run(pixelsOf('#0e7c56')));
+  check('DB별 색: 둘째 DB 항목이 초록으로 그려짐', green > 50, green);
+  await page.shot('db-colors');
+  await page.run(`document.getElementById('db-colors').click()`);
+  await sleep(800);
+  const after = Number(await page.run(pixelsOf('#0e7c56')));
+  check('DB별 색: 끄면 초록이 사라지고 범례도 숨김', after === 0 && (await page.run(`document.getElementById('db-legend').hidden`)) === true, after);
+  await page.run(`document.getElementById('view-toggle').click()`);
+  const zeroRows = q(`[...$('list-body').rows].filter((r) => r.cells[2].textContent === '0' && r.cells[3].textContent === '0').length`);
+  const before = Number(await page.run(zeroRows));
+  await page.run(`document.getElementById('isolated').click()`);
+  await expect(check, page, '외톨이 숨기기: 연결 없는 페이지가 목록에서 사라짐', `${zeroRows} === 0 && document.getElementById('list-body').rows.length === ${40 - before}`, `[${zeroRows}, document.getElementById('list-body').rows.length, ${before}]`);
+  check('외톨이 숨기기: 점검 데이터에 외톨이가 있었음(점검이 의미 있는지)', before > 0, before);
+}

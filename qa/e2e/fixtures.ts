@@ -11,11 +11,12 @@ export const SEED_SAMPLE = `(async () => {
   const names = ['프로젝트 기획','회의록 11월','로드맵','디자인 시스템','API 명세','데이터 모델','릴리스 노트','고객 인터뷰','경쟁사 분석','OKR 2026','주간 회고','버그 리포트','온보딩 가이드','팀 위키','채용 계획','예산안','마케팅 캠페인','브랜드 가이드','지표 대시보드','실험 기록'];
   const pages = []; const links = []; let seed = 7;
   const rand = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
-  for (let i = 0; i < 40; i += 1) pages.push(page('p' + i, i < 20 ? names[i] : '항목 ' + (i - 19), i >= 28 ? 'dbItem' : 'page', i >= 37 ? 'unreadable' : 'ok'));
+  const databaseOf = (i) => (i >= 28 && i < 37 ? (i < 32 ? 'db-a' : i < 35 ? 'db-b' : 'db-c') : undefined);
+  for (let i = 0; i < 40; i += 1) pages.push({ ...page('p' + i, i < 20 ? names[i] : '항목 ' + (i - 19), i >= 28 ? 'dbItem' : 'page', i >= 37 ? 'unreadable' : 'ok'), ...(databaseOf(i) ? { databaseId: databaseOf(i) } : {}) });
   for (let i = 0; i < 70; i += 1) { const a = Math.floor(rand() * 40); const b = a < 14 ? Math.floor(rand() * 14) : Math.floor(rand() * 40); if (a !== b) links.push({ from: 'p' + a, to: 'p' + b }); }
   links.push({ from: 'p1', to: 'p38' }, { from: 'p2', to: 'p39' });
   ${PUT_ALL}
-  await chrome.storage.local.set({ token: 'e2e-fake-token', tokenKind: 'internal', progress: { phase: 'done', read: 40, discovered: 40 } });
+  await chrome.storage.local.set({ token: 'e2e-fake-token', tokenKind: 'internal', progress: { phase: 'done', read: 40, discovered: 40 }, databaseNames: { 'db-a': '할 일', 'db-b': '회의록 DB', 'db-c': '자료실' } });
 })()`;
 
 /** 따라가기 점검용: Notion 주소로 쓸 수 있는 ID의 3페이지. Alpha→Beta, Gamma→Alpha */

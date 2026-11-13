@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { contrastRatio } from '../src/graph/contrast.ts';
 import { neighborMap } from '../src/graph/neighbors.ts';
-import { DARK, LIGHT } from '../src/extension/graph-view/palette.ts';
+import { DARK, databaseColors, LIGHT } from '../src/extension/graph-view/palette.ts';
 import type { Palette } from '../src/extension/graph-view/palette.ts';
 import { isNotionAppUrl, pageUrl } from '../src/notion/urlToPageId.ts';
 
@@ -42,4 +42,19 @@ test('Notion 웹앱 탭인지 판별한다', () => {
   assert.equal(isNotionAppUrl('https://app.notion.com.evil.com/'), false);
   assert.equal(isNotionAppUrl(undefined), false);
   assert.equal(isNotionAppUrl('쓰레기'), false);
+});
+
+test('DB별 색: 처음 알게 된 두 DB에 색, 나머지는 기타 DB, 새 DB가 생겨도 기존 색 유지(P2-3)', () => {
+  const two = databaseColors(['a', 'b'], LIGHT);
+  const four = databaseColors(['a', 'b', 'c', 'd'], LIGHT);
+  assert.deepEqual([four.get('a'), four.get('b'), four.get('c'), four.get('d')], [...LIGHT.databases, LIGHT.otherDatabase, LIGHT.otherDatabase]);
+  assert.deepEqual([two.get('a'), two.get('b')], [four.get('a'), four.get('b')]);
+  // 첫 DB는 DB별 색을 켜도 원래 DB 색 그대로, 기타 DB는 "읽을 수 없음"과 다른 색
+  for (const palette of [LIGHT, DARK]) {
+    assert.equal(palette.databases[0], palette.dbItem);
+    assert.notEqual(palette.otherDatabase, palette.unreadable);
+  }
+  for (const palette of [LIGHT, DARK]) {
+    for (const color of [...palette.databases, palette.otherDatabase]) assert.ok(contrastRatio(color, palette.background) >= 3, color);
+  }
 });

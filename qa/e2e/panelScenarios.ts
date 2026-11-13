@@ -10,7 +10,9 @@ const panelStarts = (title: string): string => `String(${PANEL}).startsWith(${JS
 // 도구줄 버튼·입력칸이 화면에 보이는 순서(위→아래, 왼→오)와 키보드 순서(문서 순서)가 같은지.
 // 같은 줄이라도 높이가 다른 요소(선택 상자 등)는 윗변이 달라서 세로 가운데로 줄을 판단한다
 const TAB_ORDER_MATCHES = `(() => {
-  const pos = [...document.querySelectorAll('header button, header input, header select')].filter((e) => e.offsetParent !== null).map((e) => { const r = e.getBoundingClientRect(); return { mid: r.top + r.height / 2, left: r.left }; });
+  // 닫힌 접이식 묶음(details) 안의 요소는 위치는 있어도 보이지 않고 키보드로도 가지 않아서 뺀다
+  const reachable = (e) => e.offsetParent !== null && (!e.closest('details:not([open])') || e.tagName === 'SUMMARY');
+  const pos = [...document.querySelectorAll('header button, header input, header select, header summary')].filter(reachable).map((e) => { const r = e.getBoundingClientRect(); return { mid: r.top + r.height / 2, left: r.left }; });
   return pos.every((p, i) => i === 0 || p.mid > pos[i - 1].mid + 8 || (Math.abs(p.mid - pos[i - 1].mid) <= 8 && p.left > pos[i - 1].left));
 })()`;
 
