@@ -48,7 +48,7 @@ tests/          테스트(`node --test`)
 | `viewMode` | `"side"` \| `"center"` \| `"full"` (기본 `side`) |
 | `progress` | `{ phase, read, discovered, waitingUntil?, lastError? }` — 화면이 보는 진행 상태. `phase`는 `idle/running/paused/done/error` |
 
-**`chrome.storage.session`** — 브라우저를 닫으면 사라지는 값: `originTabId`, `focusPageId`(아이콘을 누른 순간의 Notion 탭과 그 페이지 ID), `fullTabId`(전체 모드 탭)
+**`chrome.storage.session`** — 브라우저를 닫으면 사라지는 값: `originTabId`, `focusPageId`(아이콘을 누른 순간의 Notion 탭과 그 페이지 ID), `fullTabId`(전체 모드 탭). 점검용으로 `lastClick`(마지막 아이콘 클릭의 모드·콜드 스타트 여부·결과)과 `graphReport`(그래프 화면의 점·선 수와 화면 크기)도 둔다. 확장을 새로고침하면 지워진다.
 
 **IndexedDB `notidian`** — 색인 본체. **본문 글은 저장하지 않는다**(읽는 동안 메모리에서만 쓰고 버린다)
 | 저장소 | 키 | 내용 |
@@ -96,8 +96,8 @@ tests/          테스트(`node --test`)
 서비스 워커는 이벤트 하나가 5분을 넘으면 종료되고, 30초 동안 활동이 없어도 종료된다. 그래서 **조각으로 나눠 돌린다**.
 
 1. **검색 단계**: 위 `search`로 접근 가능한 모든 페이지를 받는다. 저장된 `lastEdited`와 같으면 `ok` 그대로 두고, 새 페이지이거나 바뀌었으면 `pending`으로 표시한다. 수정 시각은 분 단위로 내림되므로(시험 S-4), 마지막으로 읽은 시각(`readAt`)이 `lastEdited`에서 **2분 이내**였던 페이지는 같아 보여도 `pending`으로 표시한다. 이번에 본 ID를 `seenIds`에 모은다.
-2. **읽기 단계**: `pending` 페이지를 하나씩 읽는다. 본문 연결과 relation을 모아, 그 페이지의 옛 연결을 지우고 새 연결을 저장한 뒤 `ok`로 표시한다. 연결 대상이 `pages`에 없는 ID이면 `pending`으로 추가한다(언급을 따라가서 빠진 페이지를 보충).
-3. **정리 단계**(다시 색인 때): 이번 검색에 안 나왔고 `unreadable`도 아닌 저장된 페이지는 `GET /v1/pages/{id}`로 확인해, 404이거나 `in_trash`면 지운다. 언급으로만 발견된 페이지가 매번 다시 확인되지만 수가 적을 것으로 본다(추정).
+2. **정리 단계**(다시 색인 때, 코드 리뷰 반영으로 읽기보다 앞): 이번 검색에 안 나왔고 `ok`인 저장 페이지(언급으로만 발견된 페이지 등)를 `GET /v1/pages/{id}`로 확인한다. `in_trash`면 지우고(휴지통은 제외), 404·403이면 지우지 **않고** `unreadable`로 바꾼다(그 페이지를 가리키던 연결은 남아 회색 점이 된다, F-5). 수정 시각이 바뀌었거나 위 2분 규칙에 걸리면 `pending`으로 표시만 한다. 확인한 페이지는 `checkedAt`을 남겨, 4분 조각이 끝나 이어서 돌 때 같은 페이지를 다시 확인하지 않는다.
+3. **읽기 단계**: `pending` 페이지를 하나씩 읽는다. 본문 연결과 relation을 모아, 그 페이지의 옛 연결을 지우고 새 연결을 저장한 뒤 `ok`로 표시한다. 연결 대상이 `pages`에 없는 ID이면 `pending`으로 추가한다(언급을 따라가서 빠진 페이지를 보충). 이 단계가 끝나면 색인이 `done`이다. 하위 블록·relation 일부를 못 읽는 오류(400·403·404)는 **그 가지만 건너뛰고** 페이지는 읽은 것으로 둔다.
 4. **조각 나누기**: 한 번의 실행은 최대 **4분**만 돌고 끝내기 전에 `progress`와 `crawl`을 저장한다. 이어 갈 때는 `chrome.alarms`로 30초 뒤 깨운다. 요청마다 `storage`에 진행을 쓰므로 그 호출이 30초 타이머도 되돌린다.
 5. **이어 읽기**: 서비스 워커가 시작될 때 `phase="running"`이면 이어서 돈다. "중단"은 `phase="paused"`로 바꾸는 것이다. 어느 지점에서 끊어도 `pages.status`와 `searchCursor`로 이어진다(NF-7).
 
@@ -107,8 +107,10 @@ tests/          테스트(`node --test`)
 | 상황 | 동작 |
 |---|---|
 | 401 | `progress.phase="error"`, 설정 화면에 "토큰이 틀리거나 만료됐다" 표시(F-8) |
-| 429 | `Retry-After`초(최대 60) 기다렸다 같은 요청을 다시 한다. `waitingUntil`을 저장해 "잠시 대기 중"을 보여 준다. 연속 5번 실패하면 `paused`로 멈춘다 |
+| 429 | `Retry-After`초(최대 60) 기다렸다 같은 요청을 다시 한다. `waitingUntil`을 저장해 "잠시 대기 중"을 보여 준다. 연속 5번 실패하면 `paused`로 멈추고 "호출 제한이 계속되어 멈췄습니다" 안내를 남긴다(이어서 색인할 수 있다) |
 | 403·404, 부분 객체 조회 실패 | 그 페이지를 `unreadable`로 표시하고 계속한다(F-5) |
+| 본문(블록)·relation 읽기의 5xx·409 | 그 페이지만 `failCount`를 올리고 `pending`으로 둔 채 색인은 계속한다(F-8). 하위 블록의 400·403·404는 그 가지만 건너뛴다 |
+| 성공(2xx)인데 JSON이 아님·30초 넘게 응답 없음 | 빈 값으로 넘기지 않고 네트워크 오류처럼 3번까지 다시 시도한다. 계속 안 되면 색인이 오류로 멈춘다(페이지를 지우지 않는다) |
 | 400 `validation_error`(데이터베이스 ID를 페이지로 읽음, 시험 S-7에서 확인) | `unreadable`(`not-a-page`)로 표시하고 이 대상과 그 연결을 그래프에서 뺀다. 데이터베이스는 점이 아니다 |
 | 5xx·네트워크 오류 | 3번까지 점점 길게 기다린다. 그래도 안 되면 `failCount`를 올리고 `pending`으로 둔다. 3번 넘게 실패한 페이지는 `unreadable`로 바꾼다 |
 
@@ -128,12 +130,15 @@ tests/          테스트(`node --test`)
 
 **점 클릭(F-9)**: `side`·`center`는 클릭 시점의 활성 탭이 `app.notion.com`이면 그 탭을 `tabs.update`로 이동시키고, 아니면 새 탭으로 연다. `center`는 이동 뒤 창을 닫는다. `full`은 항상 새 탭이다.
 
-**모드 전환(S2-1)**: 버튼 클릭이 사용자 동작이라 사이드 패널을 열 수 있다. `viewMode`를 저장하고, 현재 컨테이너를 닫은 뒤 새 컨테이너를 연다.
+**모드 전환(S2-1)**: 버튼 클릭이 사용자 동작이라 사이드 패널을 열 수 있다. `viewMode`를 저장하고, 새 컨테이너를 연 뒤 현재 컨테이너를 닫는다(중앙은 `close-overlay` 메시지, 사이드는 `sidePanel.close`, 전체는 현재 탭 닫기). 중앙 창으로 바꾸려면 Notion 탭 번호(`originTabId`)가 있어야 해서, Notion 페이지에서 아이콘을 눌러 연 적이 없으면 "Notion 페이지에서 Notidian 아이콘을 눌러 중앙 창을 여세요"를 보여 준다. 실패하면 이유를 화면 상단에 알린다.
+
+**구현 위치(구조 보충)**: 보기 모드를 여는 공용 코드는 `src/extension/containers.ts`(사이드 패널·오버레이·전체 탭), 화면 요소 찾기는 `dom.ts`, 메시지 형식은 `messages.ts`, 진행 문구는 `progressText.ts`(설정 화면과 그래프 상단이 함께 씀), 설정 화면은 `options/`, 그래프 화면은 `graph-view/{main,render,search,navigate,palette}.ts`다. 시험 때 쓴 `spike.html`과 `spike/`, 서비스 워커의 `relay.ts`는 임시이고 시험이 끝나면 지운다.
 
 **그리기(`force-graph`)**
 - 크기: `force-graph`는 만들 때의 크기만 쓰고 자동으로 맞추지 않는다. 사이드 패널은 처음 크기가 0이었다(시험 S-6). 컨테이너 크기가 0보다 커진 뒤에 만들고 `ResizeObserver`로 크기를 맞춘다.
 - 점: `nodeCanvasObject`로 그린다. 일반 페이지는 원, 데이터베이스 항목은 네모, 읽을 수 없는 페이지는 회색. `nodePointerAreaPaint`도 같은 모양으로 그려야 클릭 영역이 맞는다. 크기는 `연결 수`의 제곱근에 비례한다.
-- 연결: 평소엔 화살표 없는 얇은 선. 점에 올리면 `onNodeHover`로 이웃 `Set`을 만들어 그 점의 선만 강조하고 `linkDirectionalArrowLength`를 함수로 주어 강조된 선에만 화살표를 낸다. `autoPauseRedraw(false)`로 호버 재그리기를 보장한다. 양쪽으로 이어진 선은 화살표 양쪽.
+- 연결: 평소엔 화살표 없는 얇은 선. 점에 올리면 이웃 `Set`을 만들어 그 점의 선만 강조하고 `linkDirectionalArrowLength`를 함수로 주어 강조된 선에만 화살표를 낸다. 양쪽으로 이어진 선은 화살표 양쪽(출발 쪽 화살표는 `linkCanvasObject`로 직접 그린다).
+- 호버 판정(구현에서 바뀜): `force-graph`의 `onNodeHover`는 마우스가 그래프 밖으로 나갈 때 해제를 알리지 않고, 같은 점으로 돌아와도 다시 알리지 않는다(실제 확장 점검에서 확인). 그래서 `mousemove`·`mouseleave`와 `screen2GraphCoords`로 직접 가장 가까운 점을 판정한다. 멈춘 그래프는 다시 그리지 않으므로 강조가 바뀌는 0.5초 동안만 `autoPauseRedraw(false)`로 계속 그린다.
 - 가운데 맞추기: `centerAt`, `zoom`. 시뮬레이션이 안정되기 전에는 좌표가 없으므로, 안정된 뒤에 맞춘다.
 - 색 테마: `prefers-color-scheme`. 색 값은 Plan에서 정하고, 대비(NF-3)는 테스트가 계산한다.
 - 검색(F-11): 색인의 제목에서 대소문자 무시 부분 일치. ARIA combobox, 방향키·Enter.
