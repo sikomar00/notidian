@@ -1,5 +1,5 @@
 import { buildGraph } from '../../graph/buildGraph.ts';
-import { applyFilters, localSubgraph, SHOW_ALL } from '../../graph/filter.ts';
+import { applyFilters, hideIsolated, localSubgraph, SHOW_ALL } from '../../graph/filter.ts';
 import type { KindFilter } from '../../graph/filter.ts';
 import { buildRows, linkedPages } from '../../graph/rows.ts';
 import type { NodeRow } from '../../graph/rows.ts';
@@ -13,6 +13,7 @@ import { byId } from '../dom.ts';
 import { isViewMode } from '../messages.ts';
 import type { Message, ViewMode } from '../messages.ts';
 import { describeProgress, keepTimeFresh } from '../progressText.ts';
+import { renderDatabaseLegend } from './databaseLegend.ts';
 import { renderLinks } from './linksPanel.ts';
 import { followTabs } from './follow.ts';
 import { createListView } from './listview.ts';
@@ -30,6 +31,8 @@ applyPaletteVars(palette);
 const store = openIdbStore();
 const container = byId('graph');
 const hierarchyBox = byId<HTMLInputElement>('hierarchy');
+const isolatedBox = byId<HTMLInputElement>('isolated');
+const dbColorsBox = byId<HTMLInputElement>('db-colors');
 const localBox = byId<HTMLInputElement>('local');
 const localDepth = byId<HTMLSelectElement>('local-depth');
 const reindexButton = byId<HTMLButtonElement>('reindex');
@@ -163,6 +166,8 @@ function ensureView(): GraphView | undefined {
       if (autoFit) view?.fit();
     },
   });
+  // 옆 패널처럼 그래프를 늦게 만들면 그 전에 정한 DB별 색을 넘긴다
+  view.setGroupColors(groupColors);
   return view;
 }
 
@@ -176,7 +181,10 @@ function renderEmpty(): void {
 
 // 저장소를 다시 읽지 않고, 하위 페이지 스위치·범례 필터만 바꿔 다시 그린다
 function rebuild(): void {
-  fullGraph = applyFilters(buildGraph(rawPages, rawLinks, { hierarchy: hierarchyBox.checked }), hidden);
+  const filtered = applyFilters(buildGraph(rawPages, rawLinks, { hierarchy: hierarchyBox.checked }), hidden);
+  // 지금 페이지와 선택한 페이지는 외톨이여도 남긴다(숨기면 찾을 수도, 따라갈 수도 없다)
+  fullGraph = isolatedBox.checked ? hideIsolated(filtered, [focusId, selectedId]) : filtered;
+  applyDatabaseColors();
   rows = buildRows(fullGraph);
   rowsById = new Map(rows.map((row) => [row.id, row]));
   // 숨겨진 목록은 다시 그리지 않고, 보일 때 그린다
@@ -201,7 +209,7 @@ async function reload(): Promise<void> {
   lastReload = Date.now();
   const [pages, links] = await Promise.all([store.listPages(), store.allLinks()]);
   if (ticket !== reloadTicket) return;
-  const signature = [...pages.map((p) => `${p.id}${p.title}${p.status}${p.kind}${p.parentPageId ?? ''}`), ...links.map((l) => `${l.from}>${l.to}`)].join('|');
+  const signature = [...pages.map((p) => `${p.id}${p.title}${p.status}${p.kind}${p.parentPageId ?? ''}${p.databaseId ?? ''}`), ...links.map((l) => `${l.from}>${l.to}`)].join('|');
   if (signature === lastSignature) return;
   lastSignature = signature;
   rawPages = pages;
@@ -301,6 +309,26 @@ byId('sel-clear').addEventListener('click', () => {
   byId('search').focus();
 });
 hierarchyBox.addEventListener('change', rebuild);
+isolatedBox.addEventListener('change', rebuild);
+
+// DB별 색: 이름은 지도를 다 만들 때 서비스 워커가 저장한다. 처음 알게 된 순서대로 색을 줘서 새 DB가 생겨도 기존 색은 그대로다
+let databaseNames: Record<string, string> = {};
+let databaseNamesError: string | undefined;
+let groupColors: Map<string, string> | null = null;
+// 지금 그래프에 있는 DB끼리만 색 순서를 매긴다(지워진 DB가 색 칸을 차지하지 않게). 순서는 처음 알게 된 순서
+function applyDatabaseColors(): void {
+  const present = new Set(fullGraph.nodes.flatMap((node) => (node.group ? [node.group] : [])));
+  const names = Object.fromEntries(Object.entries(databaseNames).filter(([id]) => present.has(id)));
+  groupColors = renderDatabaseLegend(byId('db-legend'), dbColorsBox.checked ? { names, error: databaseNamesError } : null, palette);
+  view?.setGroupColors(groupColors);
+}
+dbColorsBox.addEventListener('change', applyDatabaseColors);
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || (!changes.databaseNames && !changes.databaseNamesError)) return;
+  if (changes.databaseNames) databaseNames = (changes.databaseNames.newValue as Record<string, string> | undefined) ?? {};
+  if (changes.databaseNamesError) databaseNamesError = changes.databaseNamesError.newValue as string | undefined;
+  applyDatabaseColors();
+});
 for (const control of [localBox, localDepth]) {
   control.addEventListener('change', () => {
     autoFit = true;
@@ -366,10 +394,12 @@ document.addEventListener('keydown', (event) => {
 
 async function init(): Promise<void> {
   const [local, session] = await Promise.all([
-    chrome.storage.local.get(['progress', 'token']),
+    chrome.storage.local.get(['progress', 'token', 'databaseNames', 'databaseNamesError']),
     chrome.storage.session.get('focusPageId'),
   ]);
   hasToken = typeof local.token === 'string' && local.token !== '';
+  databaseNames = (local.databaseNames as Record<string, string> | undefined) ?? {};
+  databaseNamesError = local.databaseNamesError as string | undefined;
   renderProgress((local.progress as Progress | undefined) ?? IDLE_PROGRESS);
   focusId = typeof session.focusPageId === 'string' ? session.focusPageId : null;
   pickCurrent = focusId !== null;

@@ -30,6 +30,12 @@
       .legend [role="group"] { display: flex; flex-wrap: wrap; align-items: center; gap: inherit; }
       .legend button[aria-pressed] { background: transparent; color: inherit; }
       .legend button[aria-pressed="false"] { opacity: 0.55; text-decoration: line-through; }
+      /* 보기 옵션은 펼치면 아래로 겹쳐 뜨는 작은 판이라 도구줄 높이를 늘리지 않는다 */
+      .options { position: relative; }
+      .options summary { cursor: pointer; border: 1px solid var(--text); border-radius: 4px; padding: 4px 8px; list-style-position: inside; }
+      .options summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+      .options-panel { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--bg); border: 1px solid var(--text); border-radius: 4px; white-space: nowrap; }
+      .legend-db { gap: 12px; font-size: 13px; }
       .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; }
       .swatch.page { background: var(--page); border-radius: 50%; }
       .swatch.db { background: var(--db); }
@@ -91,7 +97,14 @@
         <button id="legend-db" type="button" aria-pressed="true"><span class="swatch db" aria-hidden="true"></span>DB 항목</button>
         <button id="legend-unreadable" type="button" aria-pressed="true"><span class="swatch unreadable" aria-hidden="true"></span>읽을 수 없는 페이지</button>
         </span>
-        <label><input id="hierarchy" type="checkbox" /> 하위 페이지 선 보기</label>
+        <details class="options">
+          <summary>보기 옵션</summary>
+          <div class="options-panel">
+            <label><input id="hierarchy" type="checkbox" /> 하위 페이지 선 보기</label>
+            <label><input id="isolated" type="checkbox" /> 연결 없는 페이지 숨기기</label>
+            <label><input id="db-colors" type="checkbox" /> DB별로 색 나누기</label>
+          </div>
+        </details>
         <span class="local" role="group" aria-label="주변만 보기">
           <label><input id="local" type="checkbox" aria-describedby="local-hint" /> <span class="narrow-hidden">선택한 페이지 </span>주변만</label>
           <select id="local-depth" aria-label="몇 단계까지 볼지">
@@ -102,6 +115,7 @@
           <span id="local-hint" hidden>먼저 페이지를 골라 주세요</span>
         </span>
       </div>
+      <div id="db-legend" class="row legend-db" role="group" aria-label="DB별 색" hidden></div>
       <div class="row">
         <span id="status"></span>
         <button id="reindex" type="button" aria-describedby="reindex-hint">연결 지도 만들기</button>

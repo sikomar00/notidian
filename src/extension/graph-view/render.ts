@@ -14,6 +14,8 @@ export interface GraphView {
   fit(): void;
   zoomBy(factor: number): void;
   resize(width: number, height: number): void;
+  /** DB 항목을 DB별 색으로 칠한다(null이면 한 색). */
+  setGroupColors(colors: Map<string, string> | null): void;
 }
 
 interface ViewState {
@@ -23,6 +25,8 @@ interface ViewState {
   hubIds: Set<string>;
   neighbors: Map<string, Set<string>>;
   nodes: Map<string, ViewNode>;
+  /** DB별 색을 켰을 때 DB 번호 → 색. 꺼져 있으면 null(모든 DB 항목이 같은 색) */
+  groupColors: Map<string, string> | null;
 }
 
 const LABEL_ZOOM = 1.6;
@@ -91,6 +95,11 @@ function fillShape(ctx: CanvasRenderingContext2D, node: ViewNode, radius: number
   ctx.fill();
 }
 
+function dbItemColor(state: ViewState, node: ViewNode): string {
+  // 아직 이름을 모르는(지도를 다 만들기 전) DB는 기본 DB 색으로 둔다
+  return state.groupColors?.get(node.group ?? '') ?? state.palette.dbItem;
+}
+
 function drawNode(state: ViewState, node: ViewNode, ctx: CanvasRenderingContext2D, scale: number): void {
   const { palette } = state;
   const radius = radiusOf(node);
@@ -104,7 +113,7 @@ function drawNode(state: ViewState, node: ViewNode, ctx: CanvasRenderingContext2
     ctx.stroke();
     ctx.setLineDash([]);
   } else {
-    ctx.fillStyle = node.kind === 'dbItem' ? palette.dbItem : palette.page;
+    ctx.fillStyle = node.kind === 'page' ? palette.page : dbItemColor(state, node);
     fillShape(ctx, node, radius);
   }
   if (node.id === state.focusId) {
@@ -315,6 +324,10 @@ function createController(graph: ViewGraph, state: ViewState, redraw: () => void
       centerOn(id);
       return true;
     },
+    setGroupColors(colors) {
+      state.groupColors = colors;
+      redraw();
+    },
     resize(width, height) {
       graph.width(width).height(height);
     },
@@ -326,7 +339,7 @@ export function createGraphView(
   palette: Palette,
   handlers: { onNodeClick: (node: GraphNode) => void; onSettled?: () => void },
 ): GraphView {
-  const state: ViewState = { palette, hoverId: null, focusId: null, hubIds: new Set(), neighbors: new Map(), nodes: new Map() };
+  const state: ViewState = { palette, hoverId: null, focusId: null, hubIds: new Set(), neighbors: new Map(), nodes: new Map(), groupColors: null };
   const graph = configureGraph(container, state, (node) => handlers.onNodeClick(node));
   graph.d3Force('gravity', gravity(GRAVITY));
   // 배치 계산의 대부분이 점끼리 밀어내는 힘이라(프로파일 2,000점 기준 약 65%), 먼 점끼리는 계산하지 않는다
