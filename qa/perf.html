@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Notidian 그래프 성능 점검 (가짜 데이터)</title>
+    <style>
+      :root { --bg: #ffffff; --text: #1a1a1a; --focus: #c01c28; }
+      body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
+      header { padding: 8px 12px; border-bottom: 1px solid var(--text); }
+      a { color: inherit; margin-right: 12px; }
+      #graph { height: 70vh; }
+      pre { margin: 0; padding: 8px 12px; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>가짜 데이터만 씁니다(실제 Notion·토큰 없음). 창을 보이는 상태로 두세요 — 최소화·가려진 탭에서는 측정할 수 없습니다.</p>
+      <a href="?n=500">500점</a><a href="?n=2000">2,000점</a><a href="?n=5000">5,000점</a>
+    </header>
+    <div id="graph"></div>
+    <pre id="out" role="status" aria-live="polite">측정 중…</pre>
+    <script type="module" src="/qa/perf.ts"></script>
+  </body>
+</html>

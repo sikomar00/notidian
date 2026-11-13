@@ -1,0 +1,246 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { beginCrawl, runCrawl } from '../src/extension/background/crawl.ts';
+import type { CrawlDeps } from '../src/extension/background/crawl.ts';
+import { buildGraph } from '../src/graph/buildGraph.ts';
+import type { Requester } from '../src/notion/endpoints.ts';
+import { withRetry } from '../src/notion/retry.ts';
+import { childOf, DB_ITEM, FakeNotion, hex, link, mention, paragraph, uid, WORKSPACE } from './helpers/fakeNotion.ts';
+import type { FakeBlock, FakePage } from './helpers/fakeNotion.ts';
+import { MemoryStore } from './helpers/memoryStore.ts';
+
+const T0 = Date.parse('2026-11-13T08:00:00.000Z');
+const OLD = '2026-11-13T07:00:00.000Z';
+const [ROOT, A, B, C, D, E, I1, I2, I3, T1, T2, DB] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 99].map(uid) as [
+  string, string, string, string, string, string, string, string, string, string, string, string,
+];
+const notionUrl = (id: string): string => `https://app.notion.com/p/${hex(id)}`;
+
+/** 시험 때 `시험용 상위 페이지` 아래에 만든 구조와 같다(docs/spike-results.md 정답표). */
+function buildWorld(): FakeNotion {
+  const fake = new FakeNotion();
+  fake.databases.add(DB);
+  const page = (id: string, title: string, parent: Record<string, unknown>, blocks: FakeBlock[] = [], extra: Partial<FakePage> = {}) =>
+    fake.add({ id, title, parent, edited: OLD, blocks, ...extra });
+  page(ROOT, 'ROOT', WORKSPACE);
+  page(A, 'A', childOf(ROOT), [
+    paragraph('a1', mention(B), link(notionUrl(C)), mention(I1)),
+    { id: 'a2', type: 'heading_3', heading_3: { rich_text: [] }, children: [paragraph('a3', mention(D))] },
+  ]);
+  page(B, 'B', childOf(ROOT), [
+    paragraph('b1', link(`https://www.notion.so/${hex(C)}`), mention(A)),
+    { id: 'b2', type: 'child_page', child_page: { title: 'E' } },
+  ]);
+  page(C, 'C', childOf(ROOT), [paragraph('c1', link(notionUrl(DB)))]);
+  page(D, 'D', childOf(ROOT), [paragraph('d1')]);
+  page(E, 'E', childOf(B));
+  page(T1, 'T1', DB_ITEM);
+  page(T2, 'T2', DB_ITEM);
+  page(I1, 'I1', DB_ITEM, [], { relation: [T1] });
+  page(I2, 'I2', DB_ITEM, [], { relation: [T1, T2] });
+  page(I3, 'I3', DB_ITEM);
+  return fake;
+}
+
+function harness(fake: FakeNotion = buildWorld(), options: { retry?: boolean } = {}) {
+  const store = new MemoryStore();
+  const clock = { t: T0 };
+  const stop = { value: false };
+  const timed: Requester = async (req) => {
+    clock.t += 350;
+    return fake.request(req);
+  };
+  const request = options.retry ? withRetry(timed, { sleep: async () => {}, now: () => clock.t }) : timed;
+  const deps: CrawlDeps = { request, store, now: () => clock.t, isStopped: () => stop.value, onProgress: () => {} };
+  return { fake, store, clock, stop, deps };
+}
+type Harness = ReturnType<typeof harness>;
+
+async function crawlAll(h: Harness): Promise<void> {
+  await beginCrawl(h.store, h.deps.now);
+  assert.deepEqual(await runCrawl(h.deps, Infinity), { kind: 'done' });
+}
+
+const targetsOf = async (h: Harness, from: string): Promise<string[]> =>
+  (await h.store.allLinks()).filter((link) => link.from === from).map((link) => link.to).sort();
+
+test('전체 색인: 시험 정답표와 같은 페이지와 연결(F-2, F-3, F-4)', async () => {
+  const h = harness();
+  await crawlAll(h);
+  const pages = await h.store.listPages();
+  assert.equal(pages.filter((page) => page.status === 'ok').length, 11);
+  assert.equal((await h.store.getPage(DB))?.unreadableReason, 'not-a-page');
+  assert.equal((await h.store.getPage(I1))?.kind, 'dbItem');
+  assert.equal((await h.store.getPage(E))?.parentPageId, B);
+  assert.deepEqual(await targetsOf(h, A), [B, C, D, I1].sort());
+
+  const graph = buildGraph(pages, await h.store.allLinks(), { hierarchy: false });
+  assert.equal(graph.nodes.length, 11);
+  assert.equal(graph.links.length, 8);
+  assert.equal(graph.links.find((l) => [l.source, l.target].includes(A) && [l.source, l.target].includes(B))?.bidirectional, true);
+  assert.equal(buildGraph(pages, await h.store.allLinks(), { hierarchy: true }).links.length, 8 + 5);
+});
+
+test('검색이 여러 쪽이어도 결과가 같다', async () => {
+  const whole = harness();
+  await crawlAll(whole);
+  const paged = harness();
+  paged.fake.searchPageSize = 3;
+  await crawlAll(paged);
+  assert.deepEqual(paged.store.snapshot(), whole.store.snapshot());
+  assert.equal(paged.fake.count('POST /v1/search'), 4);
+});
+
+test('중간에 끊고 이어 읽은 결과가 한 번에 읽은 결과와 같다(NF-7)', async () => {
+  const once = harness();
+  await crawlAll(once);
+  const sliced = harness();
+  await beginCrawl(sliced.store, sliced.deps.now);
+  let rounds = 0;
+  for (;;) {
+    rounds += 1;
+    assert.ok(rounds < 200, '진행이 멈췄다');
+    const outcome = await runCrawl(sliced.deps, sliced.clock.t + 5 * 350);
+    if (outcome.kind === 'done') break;
+    assert.equal(outcome.kind, 'budget');
+  }
+  assert.ok(rounds > 3);
+  assert.deepEqual(sliced.store.snapshot(), once.store.snapshot());
+});
+
+test('중단하면 멈추고, 다시 돌리면 이어서 끝난다', async () => {
+  const h = harness();
+  await beginCrawl(h.store, h.deps.now);
+  h.stop.value = true;
+  assert.deepEqual(await runCrawl(h.deps, Infinity), { kind: 'stopped' });
+  h.stop.value = false;
+  assert.deepEqual(await runCrawl(h.deps, Infinity), { kind: 'done' });
+  assert.equal((await h.store.listPages()).filter((page) => page.status === 'ok').length, 11);
+});
+
+test('바뀐 게 없으면 검색만 하고 아무 페이지도 다시 읽지 않는다(F-6)', async () => {
+  const h = harness();
+  await crawlAll(h);
+  h.clock.t += 3_600_000;
+  h.fake.calls.length = 0;
+  await crawlAll(h);
+  assert.deepEqual(h.fake.calls, ['POST /v1/search']);
+});
+
+test('고친 페이지만 다시 읽고 지운 연결은 사라진다(F-6)', async () => {
+  const h = harness();
+  await crawlAll(h);
+  h.clock.t += 3_600_000;
+  const pageA = h.fake.pages.get(A);
+  assert.ok(pageA);
+  pageA.blocks = [paragraph('a1', link(notionUrl(C)), mention(I1))];
+  pageA.edited = '2026-11-13T08:30:00.000Z';
+  h.fake.calls.length = 0;
+  await crawlAll(h);
+  assert.equal(h.fake.count('GET /v1/pages/'), 1);
+  assert.deepEqual(await targetsOf(h, A), [C, I1].sort());
+});
+
+test('수정 시각에서 2분 이내에 읽은 페이지는 다음 색인에서 한 번 더 읽는다(시험 S-4)', async () => {
+  const h = harness();
+  const pageD = h.fake.pages.get(D);
+  assert.ok(pageD);
+  pageD.edited = '2026-11-13T07:59:30.000Z';
+  await crawlAll(h);
+  h.clock.t += 10_000;
+  h.fake.calls.length = 0;
+  await crawlAll(h);
+  assert.equal(h.fake.count(`GET /v1/pages/${D}`), 1);
+  h.clock.t += 3_600_000;
+  await crawlAll(h);
+  h.fake.calls.length = 0;
+  await crawlAll(h);
+  assert.equal(h.fake.count('GET /v1/pages/'), 0);
+});
+
+test('지워지거나 휴지통에 간 페이지는 연결과 함께 사라진다', async () => {
+  const h = harness();
+  await crawlAll(h);
+  h.clock.t += 3_600_000;
+  h.fake.pages.delete(D);
+  const pageE = h.fake.pages.get(E);
+  assert.ok(pageE);
+  pageE.inTrash = true;
+  await crawlAll(h);
+  assert.equal(await h.store.getPage(D), undefined);
+  assert.equal(await h.store.getPage(E), undefined);
+  assert.ok(!(await h.store.allLinks()).some((l) => l.to === D));
+});
+
+test('검색에 안 나오고 언급으로만 발견된 페이지도 읽고, 첫 색인에서 두 번 읽지 않는다', async () => {
+  const h = harness();
+  const pageD = h.fake.pages.get(D);
+  assert.ok(pageD);
+  pageD.searchable = false;
+  await crawlAll(h);
+  assert.equal((await h.store.getPage(D))?.status, 'ok');
+  assert.equal(h.fake.count(`GET /v1/pages/${D}`), 1);
+  h.clock.t += 3_600_000;
+  h.fake.calls.length = 0;
+  await crawlAll(h);
+  assert.equal(h.fake.count(`GET /v1/pages/${D}`), 1);
+});
+
+test('읽을 수 없는 페이지는 표시하고 계속한다(F-5)', async () => {
+  const h = harness();
+  const hidden = uid(50);
+  const pageD = h.fake.pages.get(D);
+  assert.ok(pageD);
+  pageD.blocks = [paragraph('d1', mention(hidden))];
+  h.fake.inject(`/v1/pages/${hidden}`, { status: 403, body: { code: 'restricted_resource' } });
+  await crawlAll(h);
+  const record = await h.store.getPage(hidden);
+  assert.equal(record?.status, 'unreadable');
+  assert.equal(record?.unreadableReason, 'forbidden');
+  const graph = buildGraph(await h.store.listPages(), await h.store.allLinks(), { hierarchy: false });
+  assert.equal(graph.nodes.find((node) => node.id === hidden)?.unreadable, true);
+  assert.equal((await h.store.getPage(A))?.status, 'ok');
+});
+
+test('relation이 25개를 넘으면 속성 항목으로 나머지를 읽는다', async () => {
+  const h = harness();
+  const targets = Array.from({ length: 30 }, (_, i) => uid(200 + i));
+  h.fake.add({ id: uid(150), title: 'X', parent: childOf(ROOT), edited: OLD, blocks: [], relation: targets });
+  await crawlAll(h);
+  assert.deepEqual(await targetsOf(h, uid(150)), [...targets].sort());
+  assert.ok(h.fake.count(`GET /v1/pages/${uid(150)}/properties`) >= 1);
+});
+
+test('토큰 오류(401)는 멈추고 이유를 알려 준다(F-8)', async () => {
+  const h = harness();
+  h.fake.inject('/v1/search', { status: 401, body: { code: 'unauthorized' } });
+  await beginCrawl(h.store, h.deps.now);
+  assert.deepEqual(await runCrawl(h.deps, Infinity), { kind: 'error', reason: 'token', message: '토큰이 틀리거나 만료됐습니다' });
+});
+
+test('한 페이지가 5xx로 실패해도 색인은 끝나고, 다음 색인에서 다시 읽는다(F-8)', async () => {
+  const h = harness(buildWorld(), { retry: true });
+  const bad = { status: 503, body: { code: 'service_unavailable' } };
+  h.fake.inject(`/v1/pages/${B}`, bad, bad, bad);
+  await crawlAll(h);
+  const failed = await h.store.getPage(B);
+  assert.equal(failed?.status, 'pending');
+  assert.equal(failed?.failCount, 1);
+  h.clock.t += 3_600_000;
+  await crawlAll(h);
+  assert.equal((await h.store.getPage(B))?.status, 'ok');
+  assert.equal((await h.store.getPage(B))?.failCount, 0);
+});
+
+test('계속 실패하는 페이지는 4번째에 읽을 수 없음(error)으로 바꾼다', async () => {
+  const h = harness(buildWorld(), { retry: true });
+  const bad = { status: 503, body: { code: 'service_unavailable' } };
+  for (let run = 0; run < 4; run += 1) {
+    h.fake.inject(`/v1/pages/${B}`, bad, bad, bad);
+    await crawlAll(h);
+    h.clock.t += 3_600_000;
+  }
+  const record = await h.store.getPage(B);
+  assert.equal(record?.status, 'unreadable');
+  assert.equal(record?.unreadableReason, 'error');
+});
