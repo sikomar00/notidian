@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test",
     "build": "vite build && vite build --config vite.content.config.ts",
-    "qa": "vite --port 5173 --strictPort"
+    "qa": "vite --port 5173 --strictPort",
+    "qa:e2e": "npm run build && node qa/e2e/run.ts"
   },
   "dependencies": {
     "@types/chrome": "0.3.7",

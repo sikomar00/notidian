@@ -6,3 +6,5 @@ dist/
 # 토큰이 들어갈 수 있는 설정 파일
 *.local.json
 secrets.*
+# 자동 화면 점검 스크린샷
+qa/e2e/out/
