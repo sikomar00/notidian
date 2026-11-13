@@ -252,7 +252,7 @@ async function readPhase(deps: CrawlDeps, state: CrawlState, deadline: number): 
 const PHASES = { search: searchPhase, cleanup: cleanupPhase, read: readPhase } as const;
 
 function toErrorOutcome(error: unknown): CrawlOutcome {
-  if (isUnauthorized(error)) return { kind: 'error', reason: 'token', message: '토큰이 틀리거나 만료됐습니다' };
+  if (isUnauthorized(error)) return { kind: 'error', reason: 'token', message: '토큰이 맞지 않아요. 만료됐거나 잘못 복사됐을 수 있어요' };
   if (error instanceof RateLimitedError) return { kind: 'error', reason: 'rate-limit', message: error.message };
   return { kind: 'error', reason: 'unexpected', message: error instanceof Error ? error.message : '알 수 없는 오류' };
 }

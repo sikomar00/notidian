@@ -12,7 +12,7 @@ const ALARM = 'notidian-resume';
 // 서비스 워커는 이벤트 하나가 5분을 넘으면 종료되므로 4분씩 조각내어 돌린다
 const BUDGET_MS = 4 * 60_000;
 const ALARM_MINUTES = 0.5;
-const RATE_LIMIT_MESSAGE = '호출 제한이 계속되어 멈췄습니다. 잠시 뒤 이어서 색인하세요.';
+const RATE_LIMIT_MESSAGE = 'Notion이 요청을 잠시 막았어요. 1~2분 뒤 "이어서 만들기"를 눌러 주세요';
 
 const store = openIdbStore();
 let running = false;
@@ -53,7 +53,7 @@ async function runChunk(): Promise<void> {
   try {
     const token = await readToken();
     if (!token) {
-      await writeProgress({ ...(await readProgress()), phase: 'error', lastError: '토큰이 없습니다' });
+      await writeProgress({ ...(await readProgress()), phase: 'error', lastError: '토큰이 없어요. 설정에서 토큰을 저장해 주세요' });
       return;
     }
     await chrome.alarms.create(ALARM, { delayInMinutes: ALARM_MINUTES, periodInMinutes: ALARM_MINUTES });
@@ -115,11 +115,14 @@ export async function saveToken(token: string, kind: TokenKind): Promise<SaveTok
   try {
     const result = await checkToken(createNotionClient(trimmed));
     if (!result.ok) {
-      const reason = result.status === 401 ? '토큰이 틀리거나 만료됐습니다.' : `Notion이 ${result.status} 오류를 돌려줬습니다.`;
+      const reason =
+        result.status === 401
+          ? '토큰이 맞지 않아요. 만료됐거나 잘못 복사됐을 수 있어요. Notion에서 토큰을 다시 복사해 주세요.'
+          : `Notion이 ${result.status} 오류를 돌려줬어요. 잠시 뒤 다시 시도해 주세요.`;
       return { ok: false, message: reason };
     }
   } catch {
-    return { ok: false, message: 'Notion에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.' };
+    return { ok: false, message: 'Notion에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.' };
   }
   await chrome.storage.local.set({ token: trimmed, tokenKind: kind });
   return { ok: true };
