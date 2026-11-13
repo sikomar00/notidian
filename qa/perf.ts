@@ -42,7 +42,9 @@ function measure(container: HTMLElement, start: number): Promise<string> {
     let firstPaint: number | undefined;
     const frames: number[] = [];
     let last = performance.now();
-    const tick = (now: number): void => {
+    // requestAnimationFrame이 주는 시각은 프레임 시작 시각이라 측정 시작보다 앞설 수 있어서(음수가 나오던 원인) 직접 읽는다
+    const tick = (): void => {
+      const now = performance.now();
       const canvas = container.querySelector('canvas');
       if (firstPaint === undefined && canvas && hasPaintedPixel(canvas)) firstPaint = now - start;
       if (firstPaint !== undefined) frames.push(now - last);
@@ -75,10 +77,19 @@ async function run(): Promise<void> {
   }
   const { pages, links } = fakeData(nodeCount);
   const start = performance.now();
-  const view = createGraphView(container, palette, { onNodeClick: () => undefined });
+  let settledMs: number | undefined;
+  const view = createGraphView(container, palette, {
+    onNodeClick: () => undefined,
+    onSettled: () => {
+      settledMs ??= performance.now() - start;
+    },
+  });
   view.resize(container.clientWidth, container.clientHeight);
   view.setData(buildGraph(pages, links, { hierarchy: false }));
-  out.textContent = `${nodeCount}점·선 ${links.length}개 — ${await measure(container, start)}`;
+  const frames = await measure(container, start);
+  while (settledMs === undefined && performance.now() - start < 30_000) await new Promise((resolve) => setTimeout(resolve, 200));
+  const settled = settledMs === undefined ? '30초 넘음' : `${Math.round(settledMs)}ms`;
+  out.textContent = `${nodeCount}점·선 ${links.length}개 — ${frames}, 배치가 멈출 때까지 ${settled}`;
 }
 
 void run();

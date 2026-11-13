@@ -1,24 +1,43 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createAnnouncer, shouldAnnounce } from '../src/extension/announce.ts';
 import { describeProgress } from '../src/extension/progressText.ts';
 
-test('상태마다 쉬운 말로 알려 준다', () => {
-  assert.equal(describeProgress({ phase: 'idle', read: 0, discovered: 0 }), '아직 색인하지 않았습니다.');
-  assert.equal(
-    describeProgress({ phase: 'running', read: 12, discovered: 30 }),
-    '색인 중 — 읽은 페이지 12개 / 발견한 페이지 30개',
-  );
-  assert.equal(describeProgress({ phase: 'done', read: 30, discovered: 30 }), '색인 완료 — 페이지 30개');
-  assert.equal(describeProgress({ phase: 'paused', read: 5, discovered: 9 }), '중단됨 — 읽은 페이지 5개 / 발견한 페이지 9개');
+test('상태마다 쉬운 말로 알려 준다(화면에서는 "연결 지도")', () => {
+  assert.equal(describeProgress({ phase: 'idle', read: 0, discovered: 0 }), '아직 연결 지도를 만들지 않았어요.');
+  assert.equal(describeProgress({ phase: 'running', read: 12, discovered: 30 }), '연결 지도를 만드는 중이에요 · 12 / 30개 페이지 읽음');
+  assert.equal(describeProgress({ phase: 'done', read: 30, discovered: 30 }), '연결 지도 완성 · 페이지 30개');
+  assert.equal(describeProgress({ phase: 'paused', read: 5, discovered: 9 }), '멈췄어요 · 5 / 9개 페이지 읽음');
 });
 
-test('호출 제한으로 기다리는 동안에만 "잠시 대기 중"을 붙인다', () => {
+test('호출 제한으로 기다리는 동안에만 기다린다고 붙인다', () => {
   const progress = { phase: 'running', read: 1, discovered: 2, waitingUntil: 5000 } as const;
-  assert.match(describeProgress(progress, 1000), /잠시 대기 중/);
-  assert.doesNotMatch(describeProgress(progress, 6000), /잠시 대기 중/);
+  assert.match(describeProgress(progress, 1000), /기다리는 중/);
+  assert.doesNotMatch(describeProgress(progress, 6000), /기다리는 중/);
 });
 
-test('오류는 이유와 함께 보여 준다', () => {
-  const text = describeProgress({ phase: 'error', read: 1, discovered: 2, lastError: '토큰이 틀리거나 만료됐습니다' });
-  assert.match(text, /토큰이 틀리거나 만료됐습니다/);
+test('오류와 멈춘 이유는 함께 보여 준다', () => {
+  assert.match(describeProgress({ phase: 'error', read: 1, discovered: 2, lastError: '토큰이 없어요' }), /토큰이 없어요/);
+  assert.match(describeProgress({ phase: 'paused', read: 1, discovered: 2, lastError: '잠시 막았어요' }), /잠시 막았어요/);
+});
+
+test('스크린리더에는 단계가 바뀔 때와 15초마다만 알린다', () => {
+  assert.equal(shouldAnnounce(undefined, 'running', 0, 15_000), true);
+  assert.equal(shouldAnnounce('running', 'running', 3_000, 15_000), false);
+  assert.equal(shouldAnnounce('running', 'running', 15_000, 15_000), true);
+  assert.equal(shouldAnnounce('running', 'done', 1, 15_000), true);
+});
+
+test('알림 영역은 읽을 때마다 바뀌지 않는다', () => {
+  let clock = 0;
+  const region = { textContent: '' } as HTMLElement;
+  const announce = createAnnouncer(region, 15_000, () => clock);
+  announce({ phase: 'running', read: 1, discovered: 10 });
+  const first = region.textContent;
+  clock = 2_000;
+  announce({ phase: 'running', read: 2, discovered: 10 });
+  assert.equal(region.textContent, first);
+  clock = 3_000;
+  announce({ phase: 'done', read: 10, discovered: 10 });
+  assert.equal(region.textContent, '연결 지도 완성 · 페이지 10개');
 });

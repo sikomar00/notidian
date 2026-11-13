@@ -283,7 +283,7 @@ test('토큰 오류(401)는 멈추고 이유를 알려 준다(F-8)', async () =>
   const h = harness();
   h.fake.inject('/v1/search', { status: 401, body: { code: 'unauthorized' } });
   await beginCrawl(h.store, h.deps.now);
-  assert.deepEqual(await runCrawl(h.deps, Infinity), { kind: 'error', reason: 'token', message: '토큰이 틀리거나 만료됐습니다' });
+  assert.deepEqual(await runCrawl(h.deps, Infinity), { kind: 'error', reason: 'token', message: '토큰이 맞지 않아요. 만료됐거나 잘못 복사됐을 수 있어요' });
 });
 
 test('한 페이지가 5xx로 실패해도 색인은 끝나고, 다음 색인에서 다시 읽는다(F-8)', async () => {
