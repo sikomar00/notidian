@@ -14,6 +14,7 @@ import { isViewMode } from '../messages.ts';
 import type { Message, ViewMode } from '../messages.ts';
 import { describeProgress } from '../progressText.ts';
 import { renderLinks } from './linksPanel.ts';
+import { followTabs } from './follow.ts';
 import { createListView } from './listview.ts';
 import { openPage, switchMode } from './navigate.ts';
 import { applyPaletteVars, currentPalette } from './palette.ts';
@@ -68,6 +69,8 @@ function openById(id: string): void {
 
 // 키보드 사용자가 검색으로 고른 페이지를 열 수 있게 선택 막대를 보여 주고 "Notion에서 열기"로 초점을 옮긴다(WCAG 2.1.1)
 function select(id: string | null): void {
+  // 사용자가 직접 고르거나 풀면, 나중에 색인된 지금 페이지가 그 선택을 덮어쓰지 않게 한다
+  pickCurrent = false;
   selectedId = id;
   renderSelection();
   if (id === null || !rowsById.has(id)) return;
@@ -93,6 +96,10 @@ const list = createListView(byId<HTMLTableSectionElement>('list-body'), byId('li
 
 function applyData(target: GraphView): void {
   target.setData(lastGraph);
+  applyFocus(target);
+}
+
+function applyFocus(target: GraphView): void {
   const present = focusId !== null && lastGraph.nodes.some((node) => node.id === focusId);
   if (present && !focusApplied) {
     target.focusNode(focusId);
@@ -267,17 +274,35 @@ chrome.storage.onChanged.addListener((changes, area) => {
     renderReindex();
   }
   const pageId: unknown = changes.focusPageId?.newValue;
-  if (area === 'session' && changes.focusPageId) {
-    focusId = typeof pageId === 'string' ? pageId : null;
-    pickCurrent = focusId !== null;
-    focusApplied = false;
-    // 강조할 페이지가 없어지면 다시 전체가 보이게 맞춘다
-    if (focusId === null) autoFit = true;
-    view?.focusNode(null);
-    // 새 지금 페이지를 고르고 그 연결을 보여 주려면 선택 막대까지 다시 그려야 한다
-    rebuild();
-  }
+  if (area === 'session' && changes.focusPageId) setCurrentPage(typeof pageId === 'string' ? pageId : null);
 });
+
+// 지금 페이지가 바뀌면(아이콘 클릭·옆 패널 따라가기) 그래프를 다시 짜지 않고 강조와 선택만 바꾼다
+function setCurrentPage(id: string | null): void {
+  focusId = id;
+  focusApplied = false;
+  // 강조할 페이지가 없어지면 다시 전체가 보이게 맞춘다
+  if (id === null) autoFit = true;
+  view?.focusNode(null);
+  // 색인에 아직 없는 페이지면 이전 페이지의 연결이 지금 페이지 것처럼 남지 않게 선택을 풀고, 색인되면 고른다
+  pickCurrent = id !== null && !rowsById.has(id);
+  if (id !== null) {
+    selectedId = rowsById.has(id) ? id : null;
+    renderSelection();
+  }
+  if (view) applyFocus(view);
+}
+
+if (mode === 'side') {
+  followTabs((pageId, tabId) => {
+    if (pageId === focusId) return;
+    setCurrentPage(pageId);
+    // 가운데 창으로 바꿀 때 쓸 Notion 탭도 지금 따라간 탭으로 맞춘다
+    chrome.storage.session.set({ originTabId: tabId }).catch((error: unknown) => {
+      notice.textContent = `지금 탭을 기억하지 못했어요: ${error instanceof Error ? error.message : String(error)}`;
+    });
+  });
+}
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && mode === 'center') {
