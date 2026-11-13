@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>Notidian 그래프</title>
     <style>
-      :root { --bg: #ffffff; --text: #1a1a1a; --focus: #c01c28; }
+      :root { --bg: #ffffff; --text: #1d2330; --focus: #c01c28; --page: #2563eb; --db: #c2410c; --unreadable: #6b7280; }
       /* hidden 속성이 아래 display 지정에 덮이지 않게 한다(안내 문구가 그래프 위에 남던 버그) */
       [hidden] { display: none !important; }
       html, body { margin: 0; height: 100%; }
@@ -24,10 +24,24 @@
       #search-list { position: absolute; z-index: 10; top: 100%; left: 0; min-width: 100%; max-height: 40vh; margin: 2px 0 0; padding: 0; overflow: auto; list-style: none; background: var(--bg); border: 1px solid var(--text); }
       #search-list li { padding: 4px 8px; cursor: pointer; }
       #search-list li[aria-selected="true"] { background: var(--text); color: var(--bg); }
-      #selection { gap: 8px; }
+      /* 범례는 눌러서 그 종류를 숨기거나 보이는 필터를 겸한다. 숨긴 상태는 색이 아니라 줄긋기·흐림으로도 알린다 */
+      .legend button[aria-pressed] { background: transparent; color: inherit; }
+      .legend button[aria-pressed="false"] { opacity: 0.55; text-decoration: line-through; }
+      .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; }
+      .swatch.page { background: var(--page); border-radius: 50%; }
+      .swatch.db { background: var(--db); }
+      .swatch.unreadable { width: 6px; height: 6px; border: 2px dashed var(--unreadable); border-radius: 50%; }
       main { flex: 1; min-height: 0; position: relative; }
+      #graph-area, #list-view { position: absolute; inset: 0; }
       #graph { position: absolute; inset: 0; overflow: hidden; }
+      .zoom { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
+      .zoom button { background: var(--bg); min-width: 36px; min-height: 36px; }
       #empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; margin: 0; padding: 16px; text-align: center; }
+      #list-view { overflow: auto; padding: 8px 12px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid color-mix(in srgb, var(--text) 25%, var(--bg)); }
+      th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+      td button { white-space: nowrap; }
       .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     </style>
   </head>
@@ -45,6 +59,12 @@
           </label>
           <ul id="search-list" role="listbox" aria-label="검색 결과" hidden></ul>
         </div>
+        <button id="view-toggle" type="button">목록으로 보기</button>
+      </div>
+      <div class="row legend" role="group" aria-label="점 종류. 눌러서 보이거나 숨겨요">
+        <button id="legend-page" type="button" aria-pressed="true"><span class="swatch page" aria-hidden="true"></span>페이지</button>
+        <button id="legend-db" type="button" aria-pressed="true"><span class="swatch db" aria-hidden="true"></span>DB 항목</button>
+        <button id="legend-unreadable" type="button" aria-pressed="true"><span class="swatch unreadable" aria-hidden="true"></span>읽을 수 없는 페이지</button>
         <label><input id="hierarchy" type="checkbox" /> 하위 페이지 선 보기</label>
       </div>
       <div class="row">
@@ -54,18 +74,35 @@
         <span id="reindex-hint" hidden>먼저 설정에서 토큰을 저장해 주세요.</span>
       </div>
       <div id="selection" class="row" role="region" aria-label="선택한 페이지" hidden>
-        <span>선택한 페이지: <strong id="sel-title"></strong></span>
+        <span>선택한 페이지: <strong id="sel-title"></strong> <span id="sel-counts"></span></span>
         <button id="sel-open" type="button">Notion에서 열기</button>
         <button id="sel-clear" type="button">선택 해제</button>
       </div>
       <div id="notice" role="status" aria-live="polite"></div>
     </header>
     <main>
-      <div id="graph" role="img" aria-label="페이지 연결 그래프. 키보드로는 위의 제목 검색으로 페이지를 고르고 열 수 있어요."></div>
-      <div id="empty" hidden>
-        <p>아직 그릴 연결이 없어요. 설정에서 토큰을 넣고 "연결 지도 만들기"를 눌러 주세요.</p>
-        <button id="empty-settings" type="button">설정 열기</button>
+      <div id="graph-area">
+        <div id="graph" role="img" aria-label="페이지 연결 그래프. 키보드로는 위의 제목 검색이나 목록 보기로 페이지를 고르고 열 수 있어요."></div>
+        <div class="zoom" role="group" aria-label="화면 조절">
+          <button id="zoom-in" type="button" aria-label="확대" title="확대">+</button>
+          <button id="zoom-out" type="button" aria-label="축소" title="축소">−</button>
+          <button id="zoom-fit" type="button" aria-label="전체 보기" title="전체 보기">⤢</button>
+        </div>
+        <div id="empty" hidden>
+          <p id="empty-text">아직 그릴 연결이 없어요. 설정에서 토큰을 넣고 "연결 지도 만들기"를 눌러 주세요.</p>
+          <button id="empty-settings" type="button">설정 열기</button>
+        </div>
       </div>
+      <section id="list-view" aria-label="페이지 목록" hidden>
+        <p id="list-note"></p>
+        <p>받은 연결은 이 페이지를 가리키는 페이지 수, 보낸 연결은 이 페이지가 가리키는 페이지 수예요.</p>
+        <table>
+          <thead>
+            <tr><th scope="col">이름</th><th scope="col">종류</th><th scope="col" class="num">받은 연결</th><th scope="col" class="num">보낸 연결</th><th scope="col"><span class="sr-only">열기</span></th></tr>
+          </thead>
+          <tbody id="list-body"></tbody>
+        </table>
+      </section>
     </main>
     <p id="live" class="sr-only" aria-live="polite"></p>
     <p id="progress-live" class="sr-only" aria-live="polite"></p>

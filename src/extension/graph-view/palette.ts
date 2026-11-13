@@ -9,24 +9,26 @@ export interface Palette {
   focus: string;
 }
 
-// 글자는 배경과 4.5:1, 점·선은 3:1 이상(WCAG 2.1 AA, NF-3). 값은 tests/palette.test.ts가 계산으로 검사한다
+// 글자는 배경과 4.5:1, 점·선은 3:1 이상(WCAG 2.1 AA, NF-3). 값은 tests/palette.test.ts가 계산으로 검사한다.
+// 페이지·DB 항목 색은 dataviz 검증기(밝기 범위·색각 이상 구분·대비)를 통과한 값이다. "읽을 수 없음"은 색 구분이 아니라
+// 상태 표시라서 회색 + 점선 테두리로 그린다(색만으로 구분하지 않기)
 export const LIGHT: Palette = {
   background: '#ffffff',
-  text: '#1a1a1a',
-  page: '#1a5fb4',
-  dbItem: '#a34100',
-  unreadable: '#6b6b6b',
+  text: '#1d2330',
+  page: '#2563eb',
+  dbItem: '#c2410c',
+  unreadable: '#6b7280',
   link: '#8a8a8a',
   linkActive: '#000000',
   focus: '#c01c28',
 };
 
 export const DARK: Palette = {
-  background: '#1b1b1b',
-  text: '#f0f0f0',
-  page: '#7ab7ff',
-  dbItem: '#ffb066',
-  unreadable: '#a8a8a8',
+  background: '#16181d',
+  text: '#e9ecf2',
+  page: '#4f8ff0',
+  dbItem: '#d5702a',
+  unreadable: '#a0a7b4',
   link: '#8a8a8a',
   linkActive: '#ffffff',
   focus: '#ffd54a',
@@ -42,4 +44,7 @@ export function applyPaletteVars(palette: Palette): void {
   style.setProperty('--bg', palette.background);
   style.setProperty('--text', palette.text);
   style.setProperty('--focus', palette.focus);
+  style.setProperty('--page', palette.page);
+  style.setProperty('--db', palette.dbItem);
+  style.setProperty('--unreadable', palette.unreadable);
 }
