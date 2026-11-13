@@ -44,7 +44,7 @@
 ## 5. Git·보안·개인정보
 - 커밋·푸시는 요청할 때만. 성격별(feat/fix/test/docs/chore/perf)로 나눠 커밋한다. `.env`, `.claude`, `node_modules`, `dist`, 토큰이 들어갈 수 있는 설정 파일은 커밋하지 않는다(`.gitignore`로 막아둠).
 - Notion 내용은 개인 데이터다. **모든 처리는 브라우저 안에서만** 하고 외부 서버·통계 수집은 두지 않는다.
-- 토큰은 사용자가 확장 설정 화면에 직접 입력하고 `chrome.storage.local`에만 저장한다. 채팅·문서·코드·커밋·로그·오류 메시지에 쓰지 않는다.
+- 토큰은 사용자가 확장 설정 화면에 직접 입력하고 `chrome.storage.local`에 저장한다. 사용자가 "브라우저를 닫으면 토큰 지우기"를 켜면 대신 `chrome.storage.session`(메모리)에 둔다(P2-6). 읽기·쓰기·옮기기·지우기는 `src/extension/tokenStore.ts`에서만 한다. 채팅·문서·코드·커밋·로그·오류 메시지에 쓰지 않는다.
 - 확장 권한(host_permissions)은 `app.notion.com`과 `api.notion.com` 두 곳으로만 제한한다.
 - 색인 캐시는 설정 화면의 버튼으로 지울 수 있어야 한다.
 - 확인하지 못한 것은 "확인하지 못했다"고 쓴다.

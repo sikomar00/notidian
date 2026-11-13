@@ -43,7 +43,8 @@ tests/          테스트(`node --test`)
 **`chrome.storage.local`** — 작은 설정만 둔다(한도 10MB)
 | 키 | 값 |
 |---|---|
-| `token` | 문자열. 로그와 오류 메시지에 절대 쓰지 않는다 |
+| `token` | 문자열. 로그와 오류 메시지에 절대 쓰지 않는다. `tokenInSession`이 켜져 있으면 여기 대신 `chrome.storage.session`(메모리, 브라우저를 닫으면 사라짐)에 둔다. 읽기·옮기기·지우기는 `src/extension/tokenStore.ts` 한 곳에서 한다 |
+| `tokenInSession` | `true`면 "브라우저를 닫으면 토큰 지우기"(P2-6) |
 | `tokenKind` | `"internal"` \| `"pat"` |
 | `viewMode` | `"side"` \| `"center"` \| `"full"` (기본 `side`) |
 | `databaseNames` | `{ [데이터 소스 ID]: 이름 }`. 지도를 다 만들 때 처음 보는 DB만 `GET /v1/data_sources/{id}`로 읽어 덧붙인다(읽지 못하면 "이름 없는 DB"). 저장 순서가 DB별 색 순서다. "저장된 데이터 지우기"로 함께 지운다 |
