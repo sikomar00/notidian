@@ -100,12 +100,65 @@ test('중간에 끊고 이어 읽은 결과가 한 번에 읽은 결과와 같�
   for (;;) {
     rounds += 1;
     assert.ok(rounds < 200, '진행이 멈췄다');
-    const outcome = await runCrawl(sliced.deps, sliced.clock.t + 5 * 350);
+    const outcome = await runCrawl(sliced.deps, sliced.clock.t + 2 * 350);
     if (outcome.kind === 'done') break;
     assert.equal(outcome.kind, 'budget');
   }
   assert.ok(rounds > 3);
   assert.deepEqual(sliced.store.snapshot(), once.store.snapshot());
+});
+
+test('검색에 나온 페이지는 다시 받지 않고, 언급으로만 찾은 대상만 받는다(P1-5)', async () => {
+  const h = harness();
+  await crawlAll(h);
+  // 검색에 안 나오는 대상은 C가 링크한 데이터베이스(DB)뿐이다
+  assert.deepEqual(h.fake.calls.filter((call) => call.startsWith('GET /v1/pages/')), [`GET /v1/pages/${DB}`]);
+  assert.deepEqual(await targetsOf(h, I2), [T1, T2].sort());
+});
+
+test('검색에 안 나오는 페이지는 언급을 따라가 페이지를 받아 읽는다', async () => {
+  const fake = buildWorld();
+  const hidden = fake.pages.get(D);
+  assert.ok(hidden);
+  hidden.searchable = false;
+  hidden.relation = [E];
+  const h = harness(fake);
+  await crawlAll(h);
+  assert.equal(h.fake.count(`GET /v1/pages/${D}`), 1);
+  assert.equal((await h.store.getPage(D))?.title, 'D');
+  assert.deepEqual(await targetsOf(h, D), [E]);
+});
+
+test('받아 둔 속성으로 늦게 읽어도, 수정 직후에 받은 속성이면 다음 색인에서 다시 읽는다(시험 S-4)', async () => {
+  const h = harness();
+  const pageD = h.fake.pages.get(D);
+  assert.ok(pageD);
+  pageD.edited = '2026-11-13T07:59:00.000Z';
+  await beginCrawl(h.store, h.deps.now);
+  // 검색만 끝내고 조각을 끊은 뒤 10분 지나서 읽는다
+  assert.deepEqual(await runCrawl(h.deps, h.clock.t + 1), { kind: 'budget' });
+  h.clock.t += 600_000;
+  assert.deepEqual(await runCrawl(h.deps, Infinity), { kind: 'done' });
+  assert.ok(Date.parse((await h.store.getPage(D))?.readAt ?? '') < T0 + 60_000);
+  h.fake.calls.length = 0;
+  await crawlAll(h);
+  assert.equal(h.fake.count(`GET /v1/blocks/${D}/`), 1);
+});
+
+test('검색에 안 나오는 페이지가 옮겨지면 다시 확인할 때 상위 페이지도 고친다', async () => {
+  const fake = buildWorld();
+  const hidden = fake.pages.get(D);
+  assert.ok(hidden);
+  hidden.searchable = false;
+  const h = harness(fake);
+  await crawlAll(h);
+  assert.equal((await h.store.getPage(D))?.parentPageId, ROOT);
+  h.clock.t += 3_600_000;
+  hidden.parent = childOf(B);
+  hidden.edited = '2026-11-13T08:30:00.000Z';
+  await crawlAll(h);
+  assert.equal((await h.store.getPage(D))?.parentPageId, B);
+  assert.equal((await h.store.getPage(D))?.prefetched, undefined);
 });
 
 test('중단하면 멈추고, 다시 돌리면 이어서 끝난다', async () => {
@@ -137,7 +190,8 @@ test('고친 페이지만 다시 읽고 지운 연결은 사라진다(F-6)', asy
   pageA.edited = '2026-11-13T08:30:00.000Z';
   h.fake.calls.length = 0;
   await crawlAll(h);
-  assert.equal(h.fake.count('GET /v1/pages/'), 1);
+  // 검색 결과의 속성을 다시 쓰므로 페이지는 받지 않고, 고친 A의 본문만 읽는다
+  assert.deepEqual(h.fake.calls.filter((call) => call.startsWith('GET')), [`GET /v1/blocks/${A}/children?page_size=100`]);
   assert.deepEqual(await targetsOf(h, A), [C, I1].sort());
 });
 
@@ -150,12 +204,12 @@ test('수정 시각에서 2분 이내에 읽은 페이지는 다음 색인에서
   h.clock.t += 10_000;
   h.fake.calls.length = 0;
   await crawlAll(h);
-  assert.equal(h.fake.count(`GET /v1/pages/${D}`), 1);
+  assert.equal(h.fake.count(`GET /v1/blocks/${D}/`), 1);
   h.clock.t += 3_600_000;
   await crawlAll(h);
   h.fake.calls.length = 0;
   await crawlAll(h);
-  assert.equal(h.fake.count('GET /v1/pages/'), 0);
+  assert.equal(h.fake.count('GET /v1/blocks/'), 0);
 });
 
 test('휴지통에 간 페이지는 지우고, 지워졌거나 접근을 잃은 페이지는 회색 점으로 남긴다(F-4, F-5)', async () => {
@@ -289,7 +343,7 @@ test('토큰 오류(401)는 멈추고 이유를 알려 준다(F-8)', async () =>
 test('한 페이지가 5xx로 실패해도 색인은 끝나고, 다음 색인에서 다시 읽는다(F-8)', async () => {
   const h = harness(buildWorld(), { retry: true });
   const bad = { status: 503, body: { code: 'service_unavailable' } };
-  h.fake.inject(`/v1/pages/${B}`, bad, bad, bad);
+  h.fake.inject(`/v1/blocks/${B}/`, bad, bad, bad);
   await crawlAll(h);
   const failed = await h.store.getPage(B);
   assert.equal(failed?.status, 'pending');
@@ -304,7 +358,7 @@ test('계속 실패하는 페이지는 4번째에 읽을 수 없음(error)으로
   const h = harness(buildWorld(), { retry: true });
   const bad = { status: 503, body: { code: 'service_unavailable' } };
   for (let run = 0; run < 4; run += 1) {
-    h.fake.inject(`/v1/pages/${B}`, bad, bad, bad);
+    h.fake.inject(`/v1/blocks/${B}/`, bad, bad, bad);
     await crawlAll(h);
     h.clock.t += 3_600_000;
   }
