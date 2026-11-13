@@ -6,14 +6,12 @@ import { buildRows, linkedPages } from '../../graph/rows.ts';
 import type { NodeRow } from '../../graph/rows.ts';
 import type { GraphData, PageRecord, RawLink } from '../../graph/types.ts';
 import { pageUrl } from '../../notion/urlToPageId.ts';
-import { createAnnouncer } from '../announce.ts';
 import { openIdbStore } from '../background/idbStore.ts';
 import { IDLE_PROGRESS } from '../background/types.ts';
-import type { Progress, ProgressPhase } from '../background/types.ts';
+import type { Progress } from '../background/types.ts';
 import { byId } from '../dom.ts';
 import { isViewMode } from '../messages.ts';
 import type { Message, ViewMode } from '../messages.ts';
-import { describeProgress, keepTimeFresh } from '../progressText.ts';
 import { hasToken as tokenPresent, tokenChanged } from '../tokenStore.ts';
 import { renderDatabaseLegend } from './databaseLegend.ts';
 import { renderLinks } from './linksPanel.ts';
@@ -24,7 +22,9 @@ import { openPage, switchMode } from './navigate.ts';
 import { applyPaletteVars, currentPalette } from './palette.ts';
 import { createGraphView } from './render.ts';
 import type { GraphView } from './render.ts';
+import { createReloader } from './reloader.ts';
 import { setupSearch } from './search.ts';
+import { createStatusLine } from './statusLine.ts';
 
 const params = new URLSearchParams(location.search);
 const requested = params.get('mode');
@@ -41,11 +41,8 @@ const isolatedBox = byId<HTMLInputElement>('isolated');
 const dbColorsBox = byId<HTMLInputElement>('db-colors');
 const localBox = byId<HTMLInputElement>('local');
 const localDepth = byId<HTMLSelectElement>('local-depth');
-const reindexButton = byId<HTMLButtonElement>('reindex');
 const viewToggle = byId<HTMLButtonElement>('view-toggle');
 const notice = byId('notice');
-const announce = createAnnouncer(byId('progress-live'));
-const RELOAD_EVERY_MS = 2000;
 const ZOOM_STEP = 1.5;
 const EMPTY_TEXT = '아직 그릴 연결이 없어요. 설정에서 토큰을 넣고 "연결 지도 만들기"를 눌러 주세요.';
 const FILTERED_TEXT = '모든 종류를 숨겼어요. 위의 점 종류 버튼을 눌러 다시 보이게 하세요.';
@@ -68,13 +65,6 @@ let selectedId: string | null = null;
 // 사용자가 직접 확대·이동하기 전까지는 점이 늘거나 배치가 멈출 때마다 전체가 보이게 맞춘다
 let autoFit = true;
 let listMode = false;
-let hasToken = false;
-let phase: ProgressPhase = 'idle';
-let lastReload = 0;
-let reloadTicket = 0;
-// 그래프에 보이는 것(제목·종류·상태·상위 페이지·연결)이 바뀌었는지 비교하는 값
-let lastSignature: string | undefined;
-let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
 function openById(id: string): void {
   if (demo) {
@@ -214,52 +204,19 @@ function rebuild(): void {
   if (target) applyData(target);
 }
 
-async function reload(): Promise<void> {
-  // 2초 갱신 읽기가 겹칠 수 있어서, 더 최근에 시작한 읽기의 결과만 쓴다
-  const ticket = ++reloadTicket;
-  lastReload = Date.now();
-  const [pages, links] = await Promise.all([store.listPages(), store.allLinks()]);
-  if (ticket !== reloadTicket) return;
-  const signature = [...pages.map((p) => `${p.id}${p.title}${p.status}${p.kind}${p.parentPageId ?? ''}${p.databaseId ?? ''}`), ...links.map((l) => `${l.from}>${l.to}`)].join('|');
-  if (signature === lastSignature) return;
-  lastSignature = signature;
-  rawPages = pages;
-  rawLinks = links;
-  pagesById = new Map(pages.map((page) => [page.id, page]));
-  rebuild();
-}
-
-// 색인 중에는 읽을 때마다 다시 그리지 않고 2초에 한 번만 갱신한다(F-15)
-function scheduleReload(running: boolean): void {
-  clearTimeout(reloadTimer);
-  const wait = running ? Math.max(0, RELOAD_EVERY_MS - (Date.now() - lastReload)) : 0;
-  reloadTimer = setTimeout(() => void reload(), wait);
-}
-
-const REINDEX_LABEL: Record<ProgressPhase, string> = {
-  idle: '연결 지도 만들기',
-  running: '만드는 중…',
-  paused: '이어서 만들기',
-  error: '이어서 만들기',
-  done: '다시 만들기',
-};
-
-// 토큰이 없으면 눌러도 오류만 나므로 끄고 이유를 보여 준다
-function renderReindex(): void {
-  reindexButton.textContent = REINDEX_LABEL[phase];
-  reindexButton.disabled = phase === 'running' || !hasToken;
-  byId('reindex-hint').hidden = hasToken;
-}
-
-let lastProgress: Progress = IDLE_PROGRESS;
-function renderProgress(progress: Progress): void {
-  lastProgress = progress;
-  phase = progress.phase;
-  byId('status').textContent = describeProgress(progress);
-  announce(progress);
-  renderReindex();
-}
-keepTimeFresh(byId('status'), () => lastProgress);
+const status = createStatusLine();
+const reloader = createReloader({
+  read: () => Promise.all([store.listPages(), store.allLinks()]),
+  onData: (pages, links) => {
+    rawPages = pages;
+    rawLinks = links;
+    pagesById = new Map(pages.map((page) => [page.id, page]));
+    rebuild();
+  },
+  onError: (error) => {
+    notice.textContent = `저장된 연결 지도를 읽지 못했어요: ${error instanceof Error ? error.message : String(error)}`;
+  },
+});
 
 for (const target of ['side', 'center', 'full'] as const) {
   const button = byId<HTMLButtonElement>(`mode-${target}`);
@@ -308,9 +265,6 @@ for (const type of ['wheel', 'mousedown'] as const) {
   container.addEventListener(type, () => (autoFit = false), { passive: true });
 }
 
-reindexButton.addEventListener('click', () => {
-  void chrome.runtime.sendMessage({ type: 'index', command: 'start' } satisfies Message);
-});
 for (const id of ['open-settings', 'empty-settings']) byId(id).addEventListener('click', () => void chrome.runtime.openOptionsPage());
 byId('sel-open').addEventListener('click', () => {
   if (selectedId !== null) openById(selectedId);
@@ -359,14 +313,11 @@ new ResizeObserver(() => {
 if (!demo) chrome.storage.onChanged.addListener((changes, area) => {
   const progress = changes.progress?.newValue as Progress | undefined;
   if (area === 'local' && progress) {
-    renderProgress(progress);
-    scheduleReload(progress.phase === 'running');
+    status.setProgress(progress);
+    reloader.schedule(progress.phase === 'running');
   }
   if (tokenChanged(changes, area)) {
-    void tokenPresent().then((present) => {
-      hasToken = present;
-      renderReindex();
-    });
+    void tokenPresent().then(status.setHasToken);
   }
   const pageId: unknown = changes.focusPageId?.newValue;
   if (area === 'session' && changes.focusPageId) setCurrentPage(typeof pageId === 'string' ? pageId : null);
@@ -415,13 +366,13 @@ async function init(): Promise<void> {
     chrome.storage.session.get('focusPageId'),
     tokenPresent(),
   ]);
-  hasToken = present;
+  status.setHasToken(present);
   databaseNames = (local.databaseNames as Record<string, string> | undefined) ?? {};
   databaseNamesError = local.databaseNamesError as string | undefined;
-  renderProgress((local.progress as Progress | undefined) ?? IDLE_PROGRESS);
+  status.setProgress((local.progress as Progress | undefined) ?? IDLE_PROGRESS);
   focusId = typeof session.focusPageId === 'string' ? session.focusPageId : null;
   pickCurrent = focusId !== null;
-  await reload();
+  await reloader.reload();
 }
 
 function showDemo(): void {
