@@ -25,6 +25,8 @@ interface ViewState {
   hubIds: Set<string>;
   neighbors: Map<string, Set<string>>;
   nodes: Map<string, ViewNode>;
+  /** 선이 많을 때 선을 가늘게 그린다(그리기 비용의 대부분이 선을 칠하는 일이다) */
+  thinLinks: boolean;
   /** DB별 색을 켰을 때 DB 번호 → 색. 꺼져 있으면 null(모든 DB 항목이 같은 색) */
   groupColors: Map<string, string> | null;
 }
@@ -35,6 +37,12 @@ const WARMUP_TICKS = 80;
 const FOCUS_ZOOM = 3;
 const REDRAW_MS = 500;
 const HIERARCHY_DASH = [4, 3];
+// 선 두께. 그리기 비용의 대부분이 선을 칠하는 일이라, 선이 많으면 가늘게 그린다(헤드리스 측정: 선 5,000개 약 18→53fps,
+// 12,500개 약 5→12fps). 가는 선은 테두리가 흐려지므로 더 진한 색(palette.thinLink)을 쓴다. 0.5px는 진하게 해도
+// 실제로 칠해진 픽셀 대비가 3:1에 못 미쳐(밝은 테마 2.96:1) 0.8px로 정했다(5.93:1, 어두운 7.46:1). 강조한 선은 늘 굵다
+const LINK = 1.1;
+const THIN_LINK = 0.8;
+const THIN_LINKS_FROM = 2500;
 // 확대하지 않아도 이름을 보여 줄 허브 점 수(연결 2개 이상인 점 중 많은 순)
 const HUB_LABELS = 8;
 // 확대 버튼·휠·전체 보기가 같은 범위를 쓰도록 그래프에도 지정한다
@@ -174,8 +182,8 @@ function configureGraph(container: HTMLElement, state: ViewState, onNodeClick: (
       ctx.fillStyle = color;
       fillShape(ctx, node, radiusOf(node) + 2);
     })
-    .linkColor((link) => (isActive(state, link) ? state.palette.linkActive : state.palette.link))
-    .linkWidth((link) => (isActive(state, link) ? 2.2 : 1.1))
+    .linkColor((link) => (isActive(state, link) ? state.palette.linkActive : state.thinLinks ? state.palette.thinLink : state.palette.link))
+    .linkWidth((link) => (isActive(state, link) ? 2.2 : state.thinLinks ? THIN_LINK : LINK))
     .linkLineDash((link) => (link.hierarchy ? HIERARCHY_DASH : null))
     .linkDirectionalArrowLength((link) => (isActive(state, link) && !link.hierarchy ? ARROW_LENGTH : 0))
     .linkDirectionalArrowRelPos((link) => arrowRelPos(state, link))
@@ -297,6 +305,7 @@ function createController(graph: ViewGraph, state: ViewState, redraw: () => void
     setData(data) {
       state.neighbors = neighborMap(data.links);
       state.hubIds = hubsOf(data.nodes);
+      state.thinLinks = data.links.length > THIN_LINKS_FROM;
       // 점이 움직이던 자리를 유지하려고 같은 ID의 점 객체를 재사용한다. 주변만 보다가 돌아와도 전체 배치가 그대로이도록, 지금 안 그리는 점의 자리도 기억한다
       const fresh: ViewNode[] = [];
       const nodes = data.nodes.map((incoming) => {
@@ -339,7 +348,7 @@ export function createGraphView(
   palette: Palette,
   handlers: { onNodeClick: (node: GraphNode) => void; onSettled?: () => void },
 ): GraphView {
-  const state: ViewState = { palette, hoverId: null, focusId: null, hubIds: new Set(), neighbors: new Map(), nodes: new Map(), groupColors: null };
+  const state: ViewState = { palette, hoverId: null, focusId: null, hubIds: new Set(), neighbors: new Map(), nodes: new Map(), groupColors: null, thinLinks: false };
   const graph = configureGraph(container, state, (node) => handlers.onNodeClick(node));
   graph.d3Force('gravity', gravity(GRAVITY));
   // 배치 계산의 대부분이 점끼리 밀어내는 힘이라(프로파일 2,000점 기준 약 65%), 먼 점끼리는 계산하지 않는다

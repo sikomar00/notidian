@@ -9,6 +9,8 @@ export interface Palette {
   otherDatabase: string;
   unreadable: string;
   link: string;
+  /** 점이 많아 선을 가늘게 그릴 때의 선 색. 가는 선은 테두리가 흐려져서 더 진하게(어두운 테마는 더 밝게) 한다 */
+  thinLink: string;
   linkActive: string;
   focus: string;
 }
@@ -29,6 +31,7 @@ export const LIGHT: Palette = {
   otherDatabase: '#374151',
   unreadable: '#6b7280',
   link: '#8a8a8a',
+  thinLink: '#3b4150',
   linkActive: '#000000',
   focus: '#c01c28',
 };
@@ -42,6 +45,7 @@ export const DARK: Palette = {
   otherDatabase: '#d1d5db',
   unreadable: '#a0a7b4',
   link: '#8a8a8a',
+  thinLink: '#c4c9d4',
   linkActive: '#ffffff',
   focus: '#ffd54a',
 };
