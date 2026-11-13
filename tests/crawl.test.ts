@@ -158,7 +158,7 @@ test('수정 시각에서 2분 이내에 읽은 페이지는 다음 색인에서
   assert.equal(h.fake.count('GET /v1/pages/'), 0);
 });
 
-test('지워지거나 휴지통에 간 페이지는 연결과 함께 사라진다', async () => {
+test('휴지통에 간 페이지는 지우고, 지워졌거나 접근을 잃은 페이지는 회색 점으로 남긴다(F-4, F-5)', async () => {
   const h = harness();
   await crawlAll(h);
   h.clock.t += 3_600_000;
@@ -167,9 +167,77 @@ test('지워지거나 휴지통에 간 페이지는 연결과 함께 사라진�
   assert.ok(pageE);
   pageE.inTrash = true;
   await crawlAll(h);
-  assert.equal(await h.store.getPage(D), undefined);
+  const gone = await h.store.getPage(D);
+  assert.equal(gone?.status, 'unreadable');
+  assert.equal(gone?.unreadableReason, 'not-found');
+  assert.ok((await h.store.allLinks()).some((l) => l.from === A && l.to === D), '그 페이지를 가리키던 연결은 남는다');
   assert.equal(await h.store.getPage(E), undefined);
-  assert.ok(!(await h.store.allLinks()).some((l) => l.to === D));
+  const graph = buildGraph(await h.store.listPages(), await h.store.allLinks(), { hierarchy: false });
+  assert.equal(graph.nodes.find((node) => node.id === D)?.unreadable, true);
+});
+
+test('검색에 안 나오는 페이지가 한 조각에 다 못 들어가도 이어서 끝난다(정리 단계 이어 돌기)', async () => {
+  const h = harness();
+  const extra = Array.from({ length: 40 }, (_, i) => uid(300 + i));
+  for (const id of extra) h.fake.add({ id, title: `M${id}`, parent: childOf(ROOT), edited: OLD, blocks: [], searchable: false });
+  const hub = h.fake.pages.get(A);
+  assert.ok(hub);
+  hub.blocks = [paragraph('a1', ...extra.map(mention))];
+  await crawlAll(h);
+  h.clock.t += 3_600_000;
+  await beginCrawl(h.store, h.deps.now);
+  let rounds = 0;
+  for (;;) {
+    rounds += 1;
+    assert.ok(rounds < 60, '진행이 멈췄다');
+    const outcome = await runCrawl(h.deps, h.clock.t + 20 * 350);
+    if (outcome.kind === 'done') break;
+    assert.equal(outcome.kind, 'budget');
+  }
+  assert.ok(rounds > 2);
+  assert.equal((await h.store.pendingIds()).length, 0);
+});
+
+test('수정 시각에서 2분 이내에 읽은, 검색에 안 나오는 페이지도 다음 색인에서 다시 읽는다', async () => {
+  const h = harness();
+  const pageD = h.fake.pages.get(D);
+  assert.ok(pageD);
+  pageD.searchable = false;
+  pageD.edited = '2026-11-13T07:59:30.000Z';
+  await crawlAll(h);
+  h.clock.t += 10_000;
+  pageD.blocks = [paragraph('d1', mention(I3))];
+  await crawlAll(h);
+  assert.deepEqual(await targetsOf(h, D), [I3]);
+});
+
+test('본문(블록) 읽기가 5xx로 실패해도 그 페이지만 실패로 세고 색인은 계속한다(F-8)', async () => {
+  const h = harness(buildWorld(), { retry: true });
+  const bad = { status: 503, body: { code: 'service_unavailable' } };
+  h.fake.inject(`/v1/blocks/${B}/children`, bad, bad, bad);
+  await crawlAll(h);
+  const failed = await h.store.getPage(B);
+  assert.equal(failed?.status, 'pending');
+  assert.equal(failed?.failCount, 1);
+  for (const id of [A, C, I1]) assert.equal((await h.store.getPage(id))?.status, 'ok');
+});
+
+test('하위 블록 하나를 못 읽어도(400) 그 가지만 건너뛰고 페이지는 읽은 것으로 둔다', async () => {
+  const h = harness();
+  h.fake.inject('/v1/blocks/a2/children', { status: 400, body: { code: 'validation_error' } });
+  await crawlAll(h);
+  assert.equal((await h.store.getPage(A))?.status, 'ok');
+  assert.deepEqual(await targetsOf(h, A), [B, C, I1].sort());
+});
+
+test('호출 제한(429)이 계속되면 rate-limit 오류로 멈춘다(F-8)', async () => {
+  const h = harness(buildWorld(), { retry: true });
+  const limited = { status: 429, body: null, retryAfterSec: 1 };
+  h.fake.inject('/v1/search', ...Array.from({ length: 6 }, () => limited));
+  await beginCrawl(h.store, h.deps.now);
+  const outcome = await runCrawl(h.deps, Infinity);
+  assert.equal(outcome.kind, 'error');
+  assert.equal(outcome.kind === 'error' ? outcome.reason : '', 'rate-limit');
 });
 
 test('검색에 안 나오고 언급으로만 발견된 페이지도 읽고, 첫 색인에서 두 번 읽지 않는다', async () => {

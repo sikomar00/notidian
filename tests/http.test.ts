@@ -61,6 +61,27 @@ test('요청 사이를 350ms 이상 띄운다', async () => {
   assert.deepEqual(waits, [250]);
 });
 
+test('응답이 너무 늦으면 TypeError로 올려 다시 시도하게 한다', async () => {
+  const request = createNotionClient(TOKEN, {
+    fetchFn: async () => {
+      throw new DOMException('timeout', 'TimeoutError');
+    },
+  });
+  await assert.rejects(request({ method: 'GET', path: '/v1/users/me' }), TypeError);
+});
+
+test('성공(200)인데 JSON이 아니면 빈 값으로 넘기지 않고 오류로 올린다', async () => {
+  const request = createNotionClient(TOKEN, { fetchFn: async () => new Response('<html>portal</html>', { status: 200 }) });
+  await assert.rejects(request({ method: 'GET', path: '/v1/pages/x' }), /읽을 수 없는 응답/);
+});
+
+test('오류(502) 응답의 본문이 JSON이 아니어도 상태는 그대로 돌려준다', async () => {
+  const request = createNotionClient(TOKEN, { fetchFn: async () => new Response('bad gateway', { status: 502 }) });
+  const res = await request({ method: 'GET', path: '/v1/pages/x' });
+  assert.equal(res.status, 502);
+  assert.equal(res.body, null);
+});
+
 test('429의 Retry-After를 돌려준다', async () => {
   const request = createNotionClient(TOKEN, { fetchFn: fakeFetch([], 429, '7') });
   const res = await request({ method: 'GET', path: '/v1/users/me' });

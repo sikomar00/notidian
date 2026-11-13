@@ -65,7 +65,7 @@ export class MemoryStore implements IndexStore {
   /** 두 실행 결과를 비교하려고 시각처럼 실행마다 달라지는 값을 뺀 사본을 만든다. */
   snapshot(): unknown {
     const pages = [...this.pages.values()]
-      .map(({ readAt: _readAt, ...rest }) => rest)
+      .map(({ readAt: _readAt, checkedAt: _checkedAt, ...rest }) => rest)
       .sort((a, b) => a.id.localeCompare(b.id));
     return { pages, links: [...this.links].sort(([a], [b]) => a.localeCompare(b)) };
   }

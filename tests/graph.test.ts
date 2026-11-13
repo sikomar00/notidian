@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildGraph, UNREADABLE_TITLE } from '../src/graph/buildGraph.ts';
+import { buildGraph, UNREADABLE_TITLE, UNTITLED } from '../src/graph/buildGraph.ts';
 import { contrastRatio } from '../src/graph/contrast.ts';
 import { mergeLinks } from '../src/graph/mergeLinks.ts';
 import { searchTitles } from '../src/graph/searchTitles.ts';
@@ -54,6 +54,16 @@ test('읽을 수 없는 페이지(status)와 데이터베이스 항목 표시', 
   const graph = buildGraph([page('a', 'A', { status: 'unreadable' }), page('d', 'D', { kind: 'dbItem' })], [], { hierarchy: false });
   assert.equal(graph.nodes.find((node) => node.id === 'a')?.unreadable, true);
   assert.equal(graph.nodes.find((node) => node.id === 'd')?.kind, 'dbItem');
+});
+
+test('제목이 비어 있으면 점 이름을 대신 준다(찾을 수 있게)', () => {
+  const graph = buildGraph(
+    [page('a', ''), page('b', '', { status: 'unreadable', unreadableReason: 'forbidden' })],
+    [],
+    { hierarchy: false },
+  );
+  assert.equal(graph.nodes.find((node) => node.id === 'a')?.title, UNTITLED);
+  assert.equal(graph.nodes.find((node) => node.id === 'b')?.title, UNREADABLE_TITLE);
 });
 
 test('계층 선은 스위치를 켤 때만, 부모가 점일 때만', () => {
