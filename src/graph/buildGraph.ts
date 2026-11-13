@@ -24,7 +24,7 @@ export function buildGraph(
   const nodes = new Map<string, GraphNode>();
   for (const page of pages) {
     if (hidden.has(page.id)) continue;
-    nodes.set(page.id, { id: page.id, title: titleOf(page), kind: page.kind, unreadable: page.status === 'unreadable', degree: 0 });
+    nodes.set(page.id, { id: page.id, title: titleOf(page), kind: page.kind, unreadable: page.status === 'unreadable', degree: 0, ...(page.databaseId ? { group: page.databaseId } : {}) });
   }
   const merged = mergeLinks(rawLinks.filter((link) => !hidden.has(link.from) && !hidden.has(link.to)));
   for (const { source, target } of merged) {

@@ -10,6 +10,8 @@ export interface PageRecord {
   url: string;
   lastEdited: string;
   parentPageId?: string;
+  /** DB 항목이 속한 DB 번호(DB별 색에 쓴다) */
+  databaseId?: string;
   status: PageStatus;
   unreadableReason?: UnreadableReason;
   readAt?: string;
@@ -47,6 +49,8 @@ export interface GraphNode {
   kind: PageKind;
   unreadable: boolean;
   degree: number;
+  /** DB 항목이 속한 DB 번호 */
+  group?: string;
 }
 
 export interface GraphData {

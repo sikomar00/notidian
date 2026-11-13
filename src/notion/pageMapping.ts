@@ -10,6 +10,8 @@ export interface PageSummary {
   url: string;
   lastEdited: string;
   parentPageId?: string;
+  /** DB 항목이 속한 데이터 소스(DB) 번호 */
+  databaseId?: string;
   inTrash: boolean;
 }
 
@@ -32,6 +34,7 @@ export function summarizePage(page: NotionObject): PageSummary | null {
   if (!id) return null;
   const parent = asRecord(page.parent);
   const parentPageId = parent.type === 'page_id' && typeof parent.page_id === 'string' ? normalizeId(parent.page_id) : null;
+  const databaseId = parent.type === 'data_source_id' && typeof parent.data_source_id === 'string' ? normalizeId(parent.data_source_id) ?? parent.data_source_id : null;
   return {
     id,
     title: titleOf(page.properties),
@@ -39,6 +42,7 @@ export function summarizePage(page: NotionObject): PageSummary | null {
     url: typeof page.url === 'string' ? page.url : '',
     lastEdited: typeof page.last_edited_time === 'string' ? page.last_edited_time : '',
     ...(parentPageId ? { parentPageId } : {}),
+    ...(databaseId ? { databaseId } : {}),
     inTrash: page.in_trash === true,
   };
 }

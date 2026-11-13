@@ -3,6 +3,7 @@ import { createNotionClient } from '../../notion/http.ts';
 import { withRetry } from '../../notion/retry.ts';
 import type { IndexCommand, SaveTokenReply, TokenKind } from '../messages.ts';
 import { beginCrawl, runCrawl } from './crawl.ts';
+import { learnDatabaseNames } from './databaseNames.ts';
 import type { CrawlOutcome } from './crawl.ts';
 import { openIdbStore } from './idbStore.ts';
 import { IDLE_PROGRESS } from './types.ts';
@@ -79,6 +80,16 @@ async function runChunk(): Promise<void> {
       Date.now() + BUDGET_MS,
     );
     await finish(outcome);
+    // 다 만든 것을 먼저 기록한 뒤 처음 보는 DB의 이름을 묻는다(DB별 색의 범례). 실패해도 지도는 완성이고,
+    // 이유는 그래프 범례에 보이도록 저장한다. 못 받은 이름은 다음 완성 때 다시 묻는다
+    if (outcome.kind === 'done') {
+      try {
+        await learnDatabaseNames(request, await store.listPages());
+        await chrome.storage.local.remove('databaseNamesError');
+      } catch (error) {
+        await chrome.storage.local.set({ databaseNamesError: error instanceof Error ? error.message : String(error) });
+      }
+    }
   } finally {
     running = false;
   }
@@ -105,6 +116,7 @@ async function clearIndex(): Promise<void> {
   await stopIndex();
   while (running) await new Promise((resolve) => setTimeout(resolve, 100));
   await store.clear();
+  await chrome.storage.local.remove('databaseNames');
   // 예전 시험 패널이 남긴 페이지 목록 사본도 지운다(패널은 지웠지만 이미 저장된 사본이 남아 있을 수 있다)
   await chrome.storage.local.remove('spikeSnapshot');
   await writeProgress(IDLE_PROGRESS);

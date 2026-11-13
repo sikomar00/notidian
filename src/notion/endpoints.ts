@@ -136,6 +136,16 @@ export async function fetchPage(request: Requester, id: string): Promise<PageFet
   return reason ? { kind: 'unreadable', reason } : { kind: 'failed', status: res.status };
 }
 
+/** 데이터 소스(DB)의 이름. 읽을 권한이 없거나(403·404) 이름이 비어 있으면 undefined. 그 밖의 실패(401·5xx 등)는 오류로 올린다(다시 물을 수 있게). */
+export async function fetchDataSourceTitle(request: Requester, id: string): Promise<string | undefined> {
+  const res = await request({ method: 'GET', path: `/v1/data_sources/${id}` });
+  if (res.status === 403 || res.status === 404) return undefined;
+  if (res.status !== 200) throw new NotionApiError(res.status, codeOf(res.body));
+  const title = asRecord(res.body).title;
+  const text = Array.isArray(title) ? title.map((item) => String(asRecord(item).plain_text ?? '')).join('') : '';
+  return text === '' ? undefined : text;
+}
+
 /** relation이 25개를 넘어 페이지 응답에 일부만 온 속성의 ID들. */
 export function overflowRelationIds(page: NotionObject): string[] {
   return Object.values(asRecord(page.properties))

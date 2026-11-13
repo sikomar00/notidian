@@ -90,6 +90,7 @@ async function absorbSearchResult(deps: CrawlDeps, item: NotionObject, run: { se
     url: summary.url,
     lastEdited: summary.lastEdited || existing?.lastEdited || '',
     ...(summary.parentPageId ? { parentPageId: summary.parentPageId } : {}),
+    ...(summary.databaseId ? { databaseId: summary.databaseId } : {}),
     status: pending ? 'pending' : 'ok',
     failCount: pending ? (existing?.failCount ?? 0) : 0,
     ...(existing?.readAt ? { readAt: existing.readAt } : {}),
@@ -211,6 +212,7 @@ async function readOne(deps: CrawlDeps, id: string, crawl: string): Promise<stri
     ...settled(record),
     ...(summary ? { title: summary.title, kind: summary.kind, url: summary.url, lastEdited: summary.lastEdited } : {}),
     ...(summary?.parentPageId ? { parentPageId: summary.parentPageId } : {}),
+    ...(summary?.databaseId ? { databaseId: summary.databaseId } : {}),
     status: 'ok',
     failCount: 0,
     // 속성은 받아 둔 시각의 것이라, "수정 직후에 읽었으면 다음에 한 번 더 읽기"(시험 S-4)가 그 시각을 기준으로 판단하게 한다
@@ -257,6 +259,7 @@ async function recheck(deps: CrawlDeps, page: PageRecord, crawl: string): Promis
       url: summary.url,
       lastEdited: summary.lastEdited,
       ...(summary.parentPageId ? { parentPageId: summary.parentPageId } : {}),
+      ...(summary.databaseId ? { databaseId: summary.databaseId } : {}),
       status: 'pending',
       checkedAt,
       prefetched: { ...propertyLinksOf(fetched.page), crawl, at: checkedAt },
