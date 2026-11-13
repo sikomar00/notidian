@@ -1,6 +1,7 @@
 import { buildGraph } from '../../graph/buildGraph.ts';
 import { applyFilters, hideIsolated, localSubgraph, SHOW_ALL } from '../../graph/filter.ts';
 import type { KindFilter } from '../../graph/filter.ts';
+import { demoData } from '../../graph/demoData.ts';
 import { buildRows, linkedPages } from '../../graph/rows.ts';
 import type { NodeRow } from '../../graph/rows.ts';
 import type { GraphData, PageRecord, RawLink } from '../../graph/types.ts';
@@ -18,13 +19,17 @@ import { renderDatabaseLegend } from './databaseLegend.ts';
 import { renderLinks } from './linksPanel.ts';
 import { followTabs } from './follow.ts';
 import { createListView } from './listview.ts';
+import { openDemoTab } from '../containers.ts';
 import { openPage, switchMode } from './navigate.ts';
 import { applyPaletteVars, currentPalette } from './palette.ts';
 import { createGraphView } from './render.ts';
 import type { GraphView } from './render.ts';
 import { setupSearch } from './search.ts';
 
-const requested = new URLSearchParams(location.search).get('mode');
+const params = new URLSearchParams(location.search);
+const requested = params.get('mode');
+// 예시로 둘러보기(P2-7): 저장된 연결 지도 대신 브라우저 안에서 만든 가짜 데이터를 보여 주고, 저장소 변경으로 덮어쓰지 않는다
+const demo = params.get('demo') === '1';
 const mode: ViewMode = isViewMode(requested) ? requested : 'full';
 const palette = currentPalette();
 applyPaletteVars(palette);
@@ -72,6 +77,10 @@ let lastSignature: string | undefined;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
 function openById(id: string): void {
+  if (demo) {
+    notice.textContent = '예시 페이지라 Notion에서 열 수 없어요. "내 연결 지도로 돌아가기"를 누르면 내 페이지를 볼 수 있어요.';
+    return;
+  }
   void openPage(mode, pageUrl(id, pagesById.get(id)?.url)).catch((error: unknown) => {
     notice.textContent = `페이지를 열지 못했어요: ${error instanceof Error ? error.message : String(error)}`;
   });
@@ -178,6 +187,7 @@ function renderEmpty(): void {
   byId('empty').hidden = lastGraph.nodes.length > 0;
   byId('empty-text').textContent = filteredOut ? FILTERED_TEXT : EMPTY_TEXT;
   byId('empty-settings').hidden = filteredOut;
+  byId('empty-demo').hidden = filteredOut || demo;
 }
 
 // 저장소를 다시 읽지 않고, 하위 페이지 스위치·범례 필터만 바꿔 다시 그린다
@@ -324,7 +334,7 @@ function applyDatabaseColors(): void {
   view?.setGroupColors(groupColors);
 }
 dbColorsBox.addEventListener('change', applyDatabaseColors);
-chrome.storage.onChanged.addListener((changes, area) => {
+if (!demo) chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || (!changes.databaseNames && !changes.databaseNamesError)) return;
   if (changes.databaseNames) databaseNames = (changes.databaseNames.newValue as Record<string, string> | undefined) ?? {};
   if (changes.databaseNamesError) databaseNamesError = changes.databaseNamesError.newValue as string | undefined;
@@ -346,7 +356,7 @@ new ResizeObserver(() => {
   else if (autoFit) target.fit();
 }).observe(container);
 
-chrome.storage.onChanged.addListener((changes, area) => {
+if (!demo) chrome.storage.onChanged.addListener((changes, area) => {
   const progress = changes.progress?.newValue as Progress | undefined;
   if (area === 'local' && progress) {
     renderProgress(progress);
@@ -378,7 +388,7 @@ function setCurrentPage(id: string | null): void {
   refreshView();
 }
 
-if (mode === 'side') {
+if (mode === 'side' && !demo) {
   followTabs((pageId, tabId) => {
     if (pageId === focusId) return;
     setCurrentPage(pageId);
@@ -396,6 +406,10 @@ document.addEventListener('keydown', (event) => {
 });
 
 async function init(): Promise<void> {
+  if (demo) {
+    showDemo();
+    return;
+  }
   const [local, session, present] = await Promise.all([
     chrome.storage.local.get(['progress', 'databaseNames', 'databaseNamesError']),
     chrome.storage.session.get('focusPageId'),
@@ -409,5 +423,26 @@ async function init(): Promise<void> {
   pickCurrent = focusId !== null;
   await reload();
 }
+
+function showDemo(): void {
+  const sample = demoData();
+  rawPages = sample.pages;
+  rawLinks = sample.links;
+  pagesById = new Map(sample.pages.map((page) => [page.id, page]));
+  databaseNames = sample.databaseNames;
+  databaseNamesError = undefined;
+  byId('demo-banner').hidden = false;
+  // 예시를 보는 동안 내 연결 지도의 상태·버튼은 헷갈리므로 숨긴다
+  byId('status-row').hidden = true;
+  rebuild();
+}
+
+function leaveDemo(): void {
+  params.delete('demo');
+  location.search = params.toString();
+}
+
+byId('demo-exit').addEventListener('click', leaveDemo);
+byId('empty-demo').addEventListener('click', () => void openDemoTab());
 
 void init();

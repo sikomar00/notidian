@@ -2,7 +2,7 @@ import { createAnnouncer } from '../announce.ts';
 import { openIdbStore } from '../background/idbStore.ts';
 import { IDLE_PROGRESS } from '../background/types.ts';
 import type { Progress } from '../background/types.ts';
-import { openFullTab } from '../containers.ts';
+import { openDemoTab, openFullTab } from '../containers.ts';
 import { byId } from '../dom.ts';
 import type { IndexCommand, Message, SaveTokenReply, TokenKind } from '../messages.ts';
 import { autoRefreshMinutes } from '../autoRefresh.ts';
@@ -149,6 +149,7 @@ stopButton.addEventListener('click', () => void runCommand('stop'));
 clearButton.addEventListener('click', () => {
   if (window.confirm('저장된 연결 지도를 지울까요? 토큰은 남고, 다시 만들려면 몇 분 걸려요.')) void runCommand('clear');
 });
+byId('open-demo').addEventListener('click', () => void openDemoTab());
 // 설정 화면에서 여는 그래프에는 "지금 보던 페이지"가 없으므로 이전 클릭의 강조를 지우고, 이미 열린 전체 탭은 재사용한다
 graphButton.addEventListener('click', () => {
   void chrome.storage.session.set({ focusPageId: null }).then(openFullTab);
