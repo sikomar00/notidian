@@ -9,7 +9,7 @@ type ViewGraph = ForceGraph<ViewNode, GraphLink>;
 export interface GraphView {
   setData(data: GraphData): void;
   /** 그 점을 강조하고 가운데로 옮긴다. 그래프에 아직 없는 점이면 false(강조는 점이 생길 때 나타난다). */
-  focusNode(id: string | null): boolean;
+  focusNode(id: string | null, move?: boolean): boolean;
   /** 모든 점이 화면에 들어오게 맞춘다. 점 좌표가 생길 때까지 잠깐 기다린다. */
   fit(): void;
   zoomBy(factor: number): void;
@@ -37,6 +37,11 @@ const HUB_LABELS = 8;
 const MIN_ZOOM = 0.01;
 const MAX_ZOOM = 12;
 const PLACE_ATTEMPTS = 20;
+const FIT_MAX_ZOOM = 4;
+const FIT_PADDING = 40;
+// 강조 테두리가 점 밖으로 나오는 만큼
+const FOCUS_RING = 3;
+const FIT_MS = 400;
 const GRAVITY = 0.04;
 const CHARGE_REACH = 250;
 // 처음 배치 틱 수 × 점 수의 상한(500점이면 80틱, 2,000점이면 20틱)
@@ -105,7 +110,7 @@ function drawNode(state: ViewState, node: ViewNode, ctx: CanvasRenderingContext2
   if (node.id === state.focusId) {
     ctx.lineWidth = 2 / scale;
     ctx.strokeStyle = palette.focus;
-    ctx.strokeRect((node.x ?? 0) - radius - 3, (node.y ?? 0) - radius - 3, (radius + 3) * 2, (radius + 3) * 2);
+    ctx.strokeRect((node.x ?? 0) - radius - FOCUS_RING, (node.y ?? 0) - radius - FOCUS_RING, (radius + FOCUS_RING) * 2, (radius + FOCUS_RING) * 2);
   }
   const emphasized =
     node.id === state.focusId || state.hubIds.has(node.id) || (state.hoverId !== null && isRelated(state, node.id));
@@ -228,6 +233,18 @@ function placeNearNeighbors(fresh: readonly ViewNode[], state: ViewState): void 
   }
 }
 
+// 모든 점이 들어오게 맞춘다. 점이 몇 개뿐이면(주변만 보기 등) 지나치게 확대돼 점이 화면을 채우므로 배율에 상한을 둔다.
+// 점 범위는 중심 좌표 기준이라 가장 큰 점의 반지름과 강조 테두리만큼 여유를 더한다(이름표는 화면 여백이 맡는다)
+function fitView(graph: ViewGraph, state: ViewState): void {
+  const box = graph.getGraphBbox() as { x: [number, number]; y: [number, number] } | null;
+  if (!box) return;
+  const margin = Math.max(0, ...[...state.nodes.values()].map(radiusOf)) + FOCUS_RING;
+  const width = box.x[1] - box.x[0] + 2 * margin;
+  const height = box.y[1] - box.y[0] + 2 * margin;
+  const scale = Math.min(FIT_MAX_ZOOM, (graph.width() - 2 * FIT_PADDING) / width, (graph.height() - 2 * FIT_PADDING) / height);
+  graph.centerAt((box.x[0] + box.x[1]) / 2, (box.y[0] + box.y[1]) / 2, FIT_MS).zoom(Math.max(MIN_ZOOM, scale), FIT_MS);
+}
+
 function hubsOf(nodes: readonly GraphNode[]): Set<string> {
   const hubs = nodes.filter((node) => node.degree >= 2).sort((a, b) => b.degree - a.degree).slice(0, HUB_LABELS);
   return new Set(hubs.map((node) => node.id));
@@ -235,6 +252,7 @@ function hubsOf(nodes: readonly GraphNode[]): Set<string> {
 
 function createController(graph: ViewGraph, state: ViewState, redraw: () => void): GraphView {
   let loaded = false;
+  const known = new Map<string, ViewNode>();
   // 화면 이동(가운데 맞추기·전체 맞추기·확대) 요청마다 번호를 올려, 더 최근 요청이 있으면 이전 재시도는 그만둔다
   let viewTicket = 0;
 
@@ -261,7 +279,7 @@ function createController(graph: ViewGraph, state: ViewState, redraw: () => void
     fit() {
       // 목록 보기로 숨겨진 동안(크기 0)에 맞추면 배율이 최소로 떨어지므로, 크기가 생길 때까지 기다린다
       const placed = (): boolean => graph.width() > 0 && [...state.nodes.values()].some((node) => node.x !== undefined);
-      whenPlaced(placed, () => graph.zoomToFit(400, 40));
+      whenPlaced(placed, () => fitView(graph, state));
     },
     zoomBy(factor) {
       viewTicket += 1;
@@ -270,12 +288,13 @@ function createController(graph: ViewGraph, state: ViewState, redraw: () => void
     setData(data) {
       state.neighbors = neighborMap(data.links);
       state.hubIds = hubsOf(data.nodes);
-      // 점이 움직이던 자리를 유지하려고 같은 ID의 점 객체를 재사용한다
+      // 점이 움직이던 자리를 유지하려고 같은 ID의 점 객체를 재사용한다. 주변만 보다가 돌아와도 전체 배치가 그대로이도록, 지금 안 그리는 점의 자리도 기억한다
       const fresh: ViewNode[] = [];
       const nodes = data.nodes.map((incoming) => {
-        const previous = state.nodes.get(incoming.id);
+        const previous = known.get(incoming.id);
         const node = Object.assign(previous ?? {}, incoming) as ViewNode;
         if (!previous) fresh.push(node);
+        known.set(node.id, node);
         return node;
       });
       state.nodes = new Map(nodes.map((node) => [node.id, node]));
@@ -286,10 +305,12 @@ function createController(graph: ViewGraph, state: ViewState, redraw: () => void
       graph.graphData({ nodes, links: data.links.map((link) => ({ ...link })) });
       redraw();
     },
-    focusNode(id) {
+    focusNode(id, move = true) {
       state.focusId = id;
-      viewTicket += 1;
       redraw();
+      // 강조만 바꿀 때는 기다리는 맞춤·이동을 취소하지 않는다
+      if (!move) return id !== null && state.nodes.has(id);
+      viewTicket += 1;
       if (id === null || !state.nodes.has(id)) return false;
       centerOn(id);
       return true;
