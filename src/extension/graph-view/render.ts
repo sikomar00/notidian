@@ -211,10 +211,11 @@ function createController(graph: ViewGraph, state: ViewState, redraw: () => void
 export function createGraphView(
   container: HTMLElement,
   palette: Palette,
-  handlers: { onNodeClick: (node: GraphNode) => void },
+  handlers: { onNodeClick: (node: GraphNode) => void; onSettled?: () => void },
 ): GraphView {
   const state: ViewState = { palette, hoverId: null, focusId: null, neighbors: new Map(), nodes: new Map() };
   const graph = configureGraph(container, state, (node) => handlers.onNodeClick(node));
+  if (handlers.onSettled) graph.onEngineStop(handlers.onSettled);
   const redraw = createRedrawScheduler(graph);
   setupHover(container, (x, y) => graph.screen2GraphCoords(x, y), state, redraw);
   return createController(graph, state, redraw);

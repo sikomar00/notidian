@@ -25,7 +25,7 @@ async function openContainer(target: ViewMode): Promise<string | undefined> {
     return undefined;
   }
   const { originTabId } = await chrome.storage.session.get('originTabId');
-  if (typeof originTabId !== 'number') return 'Notion 페이지에서 Notidian 아이콘을 눌러 중앙 창을 여세요.';
+  if (typeof originTabId !== 'number') return '가운데 창은 Notion 페이지에서 Notidian 아이콘을 눌러 열어 주세요.';
   await toggleOverlay(originTabId);
   return undefined;
 }
@@ -54,6 +54,6 @@ export async function switchMode(target: ViewMode, current: ViewMode): Promise<s
     await closeContainer(current);
     return undefined;
   } catch (error) {
-    return `열지 못했습니다: ${error instanceof Error ? error.message : String(error)}`;
+    return `열지 못했어요: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
