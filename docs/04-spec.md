@@ -46,6 +46,7 @@ tests/          테스트(`node --test`)
 | `token` | 문자열. 로그와 오류 메시지에 절대 쓰지 않는다 |
 | `tokenKind` | `"internal"` \| `"pat"` |
 | `viewMode` | `"side"` \| `"center"` \| `"full"` (기본 `side`) |
+| `databaseNames` | `{ [데이터 소스 ID]: 이름 }`. 지도를 다 만들 때 처음 보는 DB만 `GET /v1/data_sources/{id}`로 읽어 덧붙인다(읽지 못하면 "이름 없는 DB"). 저장 순서가 DB별 색 순서다. "저장된 데이터 지우기"로 함께 지운다 |
 | `autoRefreshMinutes` | `0`(끔·기본) | `30` | `60` | `1440`. 고르면 같은 주기의 `chrome.alarms`(`notidian-auto-refresh`)가 걸리고, 울릴 때 지도가 완성 상태이고 토큰이 있으면 바뀐 페이지만 다시 읽는다 |
 | `progress` | `{ phase, read, discovered, waitingUntil?, lastError?, finishedAt? }` — 화면이 보는 진행 상태. `phase`는 `idle/running/paused/done/error` |
 
