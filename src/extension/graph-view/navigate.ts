@@ -34,6 +34,8 @@ async function closeContainer(current: ViewMode): Promise<void> {
   if (current === 'center') {
     await chrome.runtime.sendMessage({ type: 'close-overlay' } satisfies Message);
   } else if (current === 'side') {
+    // sidePanel.close는 Chrome 141부터 있다. 없으면 새 컨테이너만 열고 사이드 패널은 사용자가 닫는다
+    if (typeof chrome.sidePanel.close !== 'function') return;
     const window = await chrome.windows.getCurrent();
     await chrome.sidePanel.close({ windowId: window.id ?? chrome.windows.WINDOW_ID_CURRENT });
   } else {

@@ -1,7 +1,9 @@
 import { openIdbStore } from '../background/idbStore.ts';
+import { IDLE_PROGRESS } from '../background/types.ts';
 import type { Progress } from '../background/types.ts';
-import type { IndexCommand, Message, SaveTokenReply, TokenKind } from '../messages.ts';
+import { openFullTab } from '../containers.ts';
 import { byId } from '../dom.ts';
+import type { IndexCommand, Message, SaveTokenReply, TokenKind } from '../messages.ts';
 import { describeProgress } from '../progressText.ts';
 import { renderUnreadable } from './view.ts';
 
@@ -10,7 +12,6 @@ const startButton = byId<HTMLButtonElement>('index-start');
 const stopButton = byId<HTMLButtonElement>('index-stop');
 const clearButton = byId<HTMLButtonElement>('index-clear');
 const graphButton = byId<HTMLButtonElement>('open-graph');
-const IDLE: Progress = { phase: 'idle', read: 0, discovered: 0 };
 
 const selectedKind = (): TokenKind => (byId<HTMLInputElement>('kind-pat').checked ? 'pat' : 'internal');
 
@@ -42,7 +43,7 @@ async function loadInitialState(): Promise<void> {
   byId<HTMLInputElement>('kind-pat').checked = stored.tokenKind === 'pat';
   byId('pat-warning').hidden = stored.tokenKind !== 'pat';
   byId('token-status').textContent = hasToken ? '토큰이 저장되어 있습니다. 바꾸려면 새 토큰을 넣고 다시 저장하세요.' : '아직 토큰이 없습니다.';
-  renderProgress((stored.progress as Progress | undefined) ?? IDLE);
+  renderProgress((stored.progress as Progress | undefined) ?? IDLE_PROGRESS);
   await refreshUnreadable();
 }
 
@@ -71,8 +72,9 @@ stopButton.addEventListener('click', () => void runCommand('stop'));
 clearButton.addEventListener('click', () => {
   if (window.confirm('저장된 색인을 지웁니다. 토큰은 지워지지 않습니다. 계속할까요?')) void runCommand('clear');
 });
+// 설정 화면에서 여는 그래프에는 "지금 보던 페이지"가 없으므로 이전 클릭의 강조를 지우고, 이미 열린 전체 탭은 재사용한다
 graphButton.addEventListener('click', () => {
-  void chrome.tabs.create({ url: chrome.runtime.getURL('graph.html?mode=full') });
+  void chrome.storage.session.set({ focusPageId: null }).then(openFullTab);
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {

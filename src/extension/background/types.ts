@@ -42,3 +42,5 @@ export interface Progress {
   waitingUntil?: number;
   lastError?: string;
 }
+
+export const IDLE_PROGRESS: Progress = { phase: 'idle', read: 0, discovered: 0 };

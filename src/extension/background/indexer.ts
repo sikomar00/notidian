@@ -5,13 +5,14 @@ import type { IndexCommand, SaveTokenReply, TokenKind } from '../messages.ts';
 import { beginCrawl, runCrawl } from './crawl.ts';
 import type { CrawlOutcome } from './crawl.ts';
 import { openIdbStore } from './idbStore.ts';
+import { IDLE_PROGRESS } from './types.ts';
 import type { Progress } from './types.ts';
 
 const ALARM = 'notidian-resume';
-// 서비스 워커는 이벤트 하나가 5분을 넘으면 종료되므로 4분씩 조각내어 돌리고 알람으로 이어 간다
+// 서비스 워커는 이벤트 하나가 5분을 넘으면 종료되므로 4분씩 조각내어 돌린다
 const BUDGET_MS = 4 * 60_000;
-const RESUME_DELAY_MIN = 0.5;
-const IDLE: Progress = { phase: 'idle', read: 0, discovered: 0 };
+const ALARM_MINUTES = 0.5;
+const RATE_LIMIT_MESSAGE = '호출 제한이 계속되어 멈췄습니다. 잠시 뒤 이어서 색인하세요.';
 
 const store = openIdbStore();
 let running = false;
@@ -19,7 +20,7 @@ let stopRequested = false;
 
 async function readProgress(): Promise<Progress> {
   const { progress } = await chrome.storage.local.get('progress');
-  return typeof progress === 'object' && progress !== null ? (progress as Progress) : IDLE;
+  return typeof progress === 'object' && progress !== null ? (progress as Progress) : IDLE_PROGRESS;
 }
 
 async function writeProgress(progress: Progress): Promise<void> {
@@ -31,19 +32,21 @@ async function readToken(): Promise<string | undefined> {
   return typeof token === 'string' && token !== '' ? token : undefined;
 }
 
+// 색인이 끝나면 알람을 끄고 진행 상태를 남긴다. 조각이 끝났을 뿐이면(budget) 알람이 다음 조각을 깨운다
 async function finish(outcome: CrawlOutcome): Promise<void> {
-  const { read, discovered } = await store.counts();
-  if (outcome.kind === 'budget') {
-    await chrome.alarms.create(ALARM, { delayInMinutes: RESUME_DELAY_MIN });
-    return;
-  }
+  if (outcome.kind === 'budget') return;
   await chrome.alarms.clear(ALARM);
+  const { read, discovered } = await store.counts();
   if (outcome.kind === 'done') await writeProgress({ phase: 'done', read, discovered });
   else if (outcome.kind === 'stopped') await writeProgress({ phase: 'paused', read, discovered });
+  else if (outcome.reason === 'rate-limit') await writeProgress({ phase: 'paused', read, discovered, lastError: RATE_LIMIT_MESSAGE });
   else await writeProgress({ phase: 'error', read, discovered, lastError: outcome.message });
 }
 
-/** 저장된 진행 위치에서 4분 동안 색인을 돌린다. 끝나지 않으면 알람으로 30초 뒤에 이어 간다. */
+/**
+ * 저장된 진행 위치에서 4분 동안 색인을 돌린다.
+ * 도는 동안 알람을 반복으로 걸어 둔다. 서비스 워커가 중간에 꺼져도(응답이 30초 넘게 없거나 긴 대기 중) 알람이 깨워 이어서 돈다.
+ */
 async function runChunk(): Promise<void> {
   if (running) return;
   running = true;
@@ -53,7 +56,7 @@ async function runChunk(): Promise<void> {
       await writeProgress({ ...(await readProgress()), phase: 'error', lastError: '토큰이 없습니다' });
       return;
     }
-    stopRequested = false;
+    await chrome.alarms.create(ALARM, { delayInMinutes: ALARM_MINUTES, periodInMinutes: ALARM_MINUTES });
     const request = withRetry(createNotionClient(token), {
       onWait: (until) => void readProgress().then((progress) => writeProgress({ ...progress, waitingUntil: until })),
     });
@@ -80,6 +83,7 @@ async function startIndex(): Promise<void> {
   const resumable = state !== undefined && state.phase !== 'done' && (progress.phase === 'paused' || progress.phase === 'error');
   if (!resumable) await beginCrawl(store, Date.now);
   await writeProgress({ ...(await store.counts()), phase: 'running' });
+  stopRequested = false;
   void runChunk();
 }
 
@@ -93,7 +97,9 @@ async function clearIndex(): Promise<void> {
   await stopIndex();
   while (running) await new Promise((resolve) => setTimeout(resolve, 100));
   await store.clear();
-  await writeProgress(IDLE);
+  // 시험 때 저장한 페이지 목록 사본도 함께 지운다(캐시 삭제 뒤에 페이지 목록이 남지 않게)
+  await chrome.storage.local.remove('spikeSnapshot');
+  await writeProgress(IDLE_PROGRESS);
 }
 
 export async function handleIndexCommand(command: IndexCommand): Promise<void> {
@@ -119,11 +125,14 @@ export async function saveToken(token: string, kind: TokenKind): Promise<SaveTok
   return { ok: true };
 }
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === ALARM) void runChunk();
-});
+// 알람이 깨웠을 때, 중단·완료되지 않은 색인이면 이어서 돈다
+function resumeIfRunning(): void {
+  void readProgress().then((progress) => {
+    if (progress.phase === 'running') void runChunk();
+  });
+}
 
-// 서비스 워커가 다시 깨어났을 때 중단되지 않은 색인이 있으면 이어서 돈다
-void readProgress().then((progress) => {
-  if (progress.phase === 'running') void runChunk();
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === ALARM) resumeIfRunning();
 });
+resumeIfRunning();

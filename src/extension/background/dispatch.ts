@@ -41,12 +41,23 @@ function open(mode: ViewMode, tab: chrome.tabs.Tab): Promise<unknown> {
   return openFullTab();
 }
 
+// 사이드 패널이 거절되거나(서비스 워커가 막 깨어난 첫 클릭) Notion 탭에 오버레이를 못 띄우면 아무 일도 안 일어나지 않게 전체 모드로 대신 연다
+async function fallbackToFullTab(mode: ViewMode, error: unknown): Promise<string> {
+  if (!ready || mode === 'full') return String(error);
+  try {
+    await openFullTab();
+    return `${String(error)} → 전체 모드로 대신 열었다`;
+  } catch {
+    return String(error);
+  }
+}
+
 chrome.action.onClicked.addListener((tab) => {
   const cold = !loaded;
   const opened = cold ? loading.then(() => open(viewMode, tab)) : open(viewMode, tab);
   const mode = viewMode;
   void opened
     .then(() => 'ok')
-    .catch((error: unknown) => String(error))
+    .catch((error: unknown) => fallbackToFullTab(mode, error))
     .then((result) => chrome.storage.session.set({ lastClick: { at: Date.now(), cold, mode, ready, result } }));
 });

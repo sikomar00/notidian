@@ -11,7 +11,7 @@ export function describeProgress(progress: Progress, now: number = Date.now()): 
       return `색인 중 — ${counts}${waiting ? ' (호출 제한으로 잠시 대기 중)' : ''}`;
     }
     case 'paused':
-      return `중단됨 — ${counts}`;
+      return `중단됨 — ${counts}${progress.lastError ? ` (${progress.lastError})` : ''}`;
     case 'done':
       return `색인 완료 — 페이지 ${progress.discovered}개`;
     case 'error':

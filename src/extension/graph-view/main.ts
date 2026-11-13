@@ -2,6 +2,7 @@ import { buildGraph } from '../../graph/buildGraph.ts';
 import type { GraphData, GraphNode, PageRecord } from '../../graph/types.ts';
 import { pageUrl } from '../../notion/urlToPageId.ts';
 import { openIdbStore } from '../background/idbStore.ts';
+import { IDLE_PROGRESS } from '../background/types.ts';
 import type { Progress } from '../background/types.ts';
 import { byId } from '../dom.ts';
 import { isViewMode } from '../messages.ts';
@@ -22,7 +23,6 @@ const store = openIdbStore();
 const container = byId('graph');
 const hierarchyBox = byId<HTMLInputElement>('hierarchy');
 const notice = byId('notice');
-const IDLE: Progress = { phase: 'idle', read: 0, discovered: 0 };
 const RELOAD_EVERY_MS = 2000;
 
 let view: GraphView | undefined;
@@ -31,6 +31,7 @@ let pagesById = new Map<string, PageRecord>();
 let focusId: string | null = null;
 let focusApplied = false;
 let lastReload = 0;
+let reloadTicket = 0;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
 const search = setupSearch(
@@ -46,9 +47,14 @@ function publishReport(): void {
 
 function applyData(target: GraphView): void {
   target.setData(lastGraph);
-  if (focusId !== null && !focusApplied && lastGraph.nodes.some((node) => node.id === focusId)) {
+  const present = focusId !== null && lastGraph.nodes.some((node) => node.id === focusId);
+  if (present && !focusApplied) {
     target.focusNode(focusId);
     focusApplied = true;
+  } else if (!present && focusApplied) {
+    // 현재 페이지가 그래프에 없어졌으면 이전 강조를 지운다
+    target.focusNode(null);
+    focusApplied = false;
   }
 }
 
@@ -61,10 +67,14 @@ function ensureView(): GraphView | undefined {
 }
 
 async function reload(): Promise<void> {
+  // 계층 스위치를 누른 읽기와 2초 갱신 읽기가 겹칠 수 있어서, 더 최근에 시작한 읽기의 결과만 쓴다
+  const ticket = ++reloadTicket;
   lastReload = Date.now();
-  const pages = await store.listPages();
+  const hierarchy = hierarchyBox.checked;
+  const [pages, links] = await Promise.all([store.listPages(), store.allLinks()]);
+  if (ticket !== reloadTicket) return;
   pagesById = new Map(pages.map((page) => [page.id, page]));
-  lastGraph = buildGraph(pages, await store.allLinks(), { hierarchy: hierarchyBox.checked });
+  lastGraph = buildGraph(pages, links, { hierarchy });
   search.setItems(lastGraph.nodes.filter((node) => !node.unreadable));
   byId('empty').hidden = lastGraph.nodes.length > 0;
   const target = ensureView();
@@ -126,6 +136,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'session' && changes.focusPageId) {
     focusId = typeof pageId === 'string' ? pageId : null;
     focusApplied = false;
+    view?.focusNode(null);
     if (view) applyData(view);
     publishReport();
   }
@@ -139,7 +150,7 @@ document.addEventListener('keydown', (event) => {
 
 async function init(): Promise<void> {
   const [local, session] = await Promise.all([chrome.storage.local.get('progress'), chrome.storage.session.get('focusPageId')]);
-  renderProgress((local.progress as Progress | undefined) ?? IDLE);
+  renderProgress((local.progress as Progress | undefined) ?? IDLE_PROGRESS);
   focusId = typeof session.focusPageId === 'string' ? session.focusPageId : null;
   await reload();
 }
