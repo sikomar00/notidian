@@ -41,14 +41,28 @@ function open(mode: ViewMode, tab: chrome.tabs.Tab): Promise<unknown> {
   return openFullTab();
 }
 
+// 그것마저 실패하면 아이콘에 "!"와 이유를 남겨, 눌러도 아무 일이 없는 것처럼 보이지 않게 한다
+function showOpenFailure(error: unknown): void {
+  void chrome.action.setBadgeText({ text: '!' });
+  void chrome.action.setTitle({ title: `Notidian: 그래프를 열지 못했어요. 다시 눌러 주세요 (${error instanceof Error ? error.message : String(error)})` });
+}
+
+function clearOpenFailure(): void {
+  void chrome.action.setBadgeText({ text: '' });
+  void chrome.action.setTitle({ title: chrome.runtime.getManifest().action?.default_title ?? 'Notidian' });
+}
+
 // 사이드 패널이 거절되거나(서비스 워커가 막 깨어난 첫 클릭) Notion 탭에 오버레이를 못 띄우면 아무 일도 안 일어나지 않게 전체 모드로 대신 연다
-async function fallbackToFullTab(mode: ViewMode, error: unknown): Promise<string> {
-  if (!ready || mode === 'full') return String(error);
+async function fallbackToFullTab(mode: ViewMode, error: unknown): Promise<void> {
+  if (!ready || mode === 'full') {
+    showOpenFailure(error);
+    return;
+  }
   try {
     await openFullTab();
-    return `${String(error)} → 전체 모드로 대신 열었다`;
-  } catch {
-    return String(error);
+    clearOpenFailure();
+  } catch (fallbackError) {
+    showOpenFailure(fallbackError);
   }
 }
 
@@ -56,8 +70,5 @@ chrome.action.onClicked.addListener((tab) => {
   const cold = !loaded;
   const opened = cold ? loading.then(() => open(viewMode, tab)) : open(viewMode, tab);
   const mode = viewMode;
-  void opened
-    .then(() => 'ok')
-    .catch((error: unknown) => fallbackToFullTab(mode, error))
-    .then((result) => chrome.storage.session.set({ lastClick: { at: Date.now(), cold, mode, ready, result } }));
+  void opened.then(clearOpenFailure, (error: unknown) => fallbackToFullTab(mode, error));
 });
