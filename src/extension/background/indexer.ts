@@ -97,7 +97,7 @@ async function clearIndex(): Promise<void> {
   await stopIndex();
   while (running) await new Promise((resolve) => setTimeout(resolve, 100));
   await store.clear();
-  // 시험 때 저장한 페이지 목록 사본도 함께 지운다(캐시 삭제 뒤에 페이지 목록이 남지 않게)
+  // 예전 시험 패널이 남긴 페이지 목록 사본도 지운다(패널은 지웠지만 이미 저장된 사본이 남아 있을 수 있다)
   await chrome.storage.local.remove('spikeSnapshot');
   await writeProgress(IDLE_PROGRESS);
 }

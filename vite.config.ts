@@ -11,7 +11,6 @@ export default defineConfig({
       input: {
         background: 'src/extension/background/index.ts',
         options: 'options.html',
-        spike: 'spike.html',
         graph: 'graph.html',
       },
       output: {

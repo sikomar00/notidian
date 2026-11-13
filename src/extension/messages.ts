@@ -1,11 +1,8 @@
-import type { NotionRequest } from '../notion/http.ts';
-
 export type ViewMode = 'side' | 'center' | 'full';
 export type TokenKind = 'internal' | 'pat';
 export type IndexCommand = 'start' | 'stop' | 'clear';
 
 export type Message =
-  | { type: 'notion-request'; req: NotionRequest }
   | { type: 'save-token'; token: string; kind: TokenKind }
   | { type: 'index'; command: IndexCommand }
   | { type: 'toggle-overlay' }
