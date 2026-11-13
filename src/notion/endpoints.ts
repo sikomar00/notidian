@@ -136,13 +136,19 @@ export async function fetchPage(request: Requester, id: string): Promise<PageFet
   return reason ? { kind: 'unreadable', reason } : { kind: 'failed', status: res.status };
 }
 
+/** relation이 25개를 넘어 페이지 응답에 일부만 온 속성의 ID들. */
+export function overflowRelationIds(page: NotionObject): string[] {
+  return Object.values(asRecord(page.properties))
+    .map(asRecord)
+    .filter((property) => property.type === 'relation' && property.has_more === true && typeof property.id === 'string')
+    .map((property) => String(property.id));
+}
+
 /** relation이 25개를 넘으면 페이지 응답에 일부만 오므로 속성 항목 API로 나머지를 읽는다. */
-export async function readRelationOverflow(request: Requester, pageId: string, page: NotionObject): Promise<string[]> {
+export async function readRelationOverflow(request: Requester, pageId: string, propertyIds: readonly string[]): Promise<string[]> {
   const ids: string[] = [];
-  for (const raw of Object.values(asRecord(page.properties))) {
-    const property = asRecord(raw);
-    if (property.type !== 'relation' || property.has_more !== true || typeof property.id !== 'string') continue;
-    const base = `/v1/pages/${pageId}/properties/${encodeURIComponent(property.id)}?page_size=100`;
+  for (const propertyId of propertyIds) {
+    const base = `/v1/pages/${pageId}/properties/${encodeURIComponent(propertyId)}?page_size=100`;
     let cursor: string | undefined;
     do {
       const suffix = cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : '';

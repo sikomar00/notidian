@@ -1,8 +1,9 @@
-import type { PageRecord, UnreadableReason } from '../../graph/types.ts';
+import type { PageRecord, PropertyLinks, UnreadableReason } from '../../graph/types.ts';
 import {
   fetchPage,
   isUnauthorized,
   NotionApiError,
+  overflowRelationIds,
   readBlockTree,
   readRelationOverflow,
   reasonForStatus,
@@ -61,14 +62,25 @@ function needsRead(existing: PageRecord | undefined, summary: PageSummary): bool
 // 이 페이지를 마지막으로 읽거나 존재를 확인한 시각
 const lastSeenAt = (page: PageRecord): string => [page.readAt ?? '', page.checkedAt ?? ''].sort().at(-1) ?? '';
 
-async function absorbSearchResult(deps: CrawlDeps, item: NotionObject, seen: Set<string>): Promise<void> {
+const propertyLinksOf = (page: NotionObject): PropertyLinks => ({
+  targets: extractFromProperties(page.properties),
+  overflow: overflowRelationIds(page),
+});
+
+// 읽기를 마치면 읽지 못한 이유와 미리 뽑아 둔 연결을 지운다
+function settled(record: PageRecord): PageRecord {
+  const { unreadableReason: _reason, prefetched: _links, ...rest } = record;
+  return rest;
+}
+
+async function absorbSearchResult(deps: CrawlDeps, item: NotionObject, run: { seen: Set<string>; crawl: string }): Promise<void> {
   const summary = summarizePage(item);
   if (!summary) return;
   if (summary.inTrash) {
     await deps.store.deletePage(summary.id);
     return;
   }
-  seen.add(summary.id);
+  run.seen.add(summary.id);
   const existing = await deps.store.getPage(summary.id);
   const pending = needsRead(existing, summary);
   await deps.store.putPage({
@@ -81,6 +93,8 @@ async function absorbSearchResult(deps: CrawlDeps, item: NotionObject, seen: Set
     status: pending ? 'pending' : 'ok',
     failCount: pending ? (existing?.failCount ?? 0) : 0,
     ...(existing?.readAt ? { readAt: existing.readAt } : {}),
+    // 검색 결과에 속성이 이미 들어 있어서, 읽을 때 페이지를 다시 받지 않도록 연결만 남겨 둔다(P1-5)
+    ...(pending ? { prefetched: { ...propertyLinksOf(item), crawl: run.crawl, at: iso(deps.now()) } } : {}),
   });
 }
 
@@ -91,7 +105,7 @@ async function searchPhase(deps: CrawlDeps, state: CrawlState, deadline: number)
     const stop = interrupted(deps, deadline);
     if (stop) return stop;
     const page = await searchPagesOnce(deps.request, cursor);
-    for (const item of page.results) await absorbSearchResult(deps, item, seen);
+    for (const item of page.results) await absorbSearchResult(deps, item, { seen, crawl: state.startedAt });
     cursor = page.nextCursor;
     await deps.store.putCrawl({ ...state, seenIds: [...seen], ...(cursor ? { searchCursor: cursor } : {}) });
     await report(deps);
@@ -100,10 +114,10 @@ async function searchPhase(deps: CrawlDeps, state: CrawlState, deadline: number)
   return 'next';
 }
 
-async function collectTargets(request: Requester, id: string, page: NotionObject): Promise<string[]> {
-  const targets = new Set(extractFromProperties(page.properties));
+async function collectTargets(request: Requester, id: string, props: PropertyLinks): Promise<string[]> {
+  const targets = new Set(props.targets);
   try {
-    for (const target of await readRelationOverflow(request, id, page)) targets.add(target);
+    for (const target of await readRelationOverflow(request, id, props.overflow)) targets.add(target);
   } catch (error) {
     // relation 일부를 못 읽어도 나머지 연결은 저장한다(권한 없는 대상 등)
     if (!(error instanceof NotionApiError) || isUnauthorized(error) || !reasonForStatus(error.status)) throw error;
@@ -114,21 +128,16 @@ async function collectTargets(request: Requester, id: string, page: NotionObject
   return [...targets];
 }
 
-function withoutReason(record: PageRecord): PageRecord {
-  const { unreadableReason: _reason, ...rest } = record;
-  return rest;
-}
-
 async function markUnreadable(deps: CrawlDeps, record: PageRecord, reason: UnreadableReason): Promise<void> {
   await deps.store.replaceLinks(record.id, []);
-  await deps.store.putPage({ ...record, status: 'unreadable', unreadableReason: reason, readAt: iso(deps.now()), failCount: 0 });
+  await deps.store.putPage({ ...settled(record), status: 'unreadable', unreadableReason: reason, readAt: iso(deps.now()), failCount: 0 });
 }
 
 async function recordFailure(deps: CrawlDeps, record: PageRecord): Promise<void> {
   const failCount = record.failCount + 1;
   const status = failCount > MAX_FAILURES ? 'unreadable' : 'pending';
   await deps.store.putPage({
-    ...record,
+    ...(status === 'unreadable' ? settled(record) : record),
     status,
     failCount,
     ...(status === 'unreadable' ? { unreadableReason: 'error' as const } : {}),
@@ -158,42 +167,54 @@ async function handleReadError(deps: CrawlDeps, record: PageRecord, error: unkno
   return null;
 }
 
-/** 페이지 하나를 읽어 연결을 저장한다. 새로 발견한 페이지 ID를 돌려준다. `null`이면 일시 실패. */
-async function readOne(deps: CrawlDeps, id: string): Promise<string[] | null> {
-  const record = await deps.store.getPage(id);
-  if (!record) return [];
-  const fetched = await fetchPage(deps.request, id);
+type Loaded = { props: PropertyLinks; summary?: PageSummary; capturedAt?: string } | { done: string[] | null };
+
+/**
+ * 이번 색인에서 받아 둔 속성이 있으면 그대로 쓰고, 없으면(언급으로 찾은 페이지 등) 페이지를 받는다.
+ * shortcut: 받아 둔 뒤 읽기 전에 휴지통으로 간 페이지는 이번엔 보통 점으로 남고, 다음 색인의 정리 단계에서 지워진다.
+ */
+async function loadPage(deps: CrawlDeps, record: PageRecord, crawl: string): Promise<Loaded> {
+  if (record.prefetched?.crawl === crawl) return { props: record.prefetched, capturedAt: record.prefetched.at };
+  const fetched = await fetchPage(deps.request, record.id);
   if (fetched.kind === 'unreadable') {
     await markUnreadable(deps, record, fetched.reason);
-    return [];
+    return { done: [] };
   }
   if (fetched.kind === 'failed') {
     await recordFailure(deps, record);
-    return null;
+    return { done: null };
   }
   const summary = summarizePage(fetched.page);
   if (!summary || summary.inTrash) {
-    await deps.store.deletePage(id);
-    return [];
+    await deps.store.deletePage(record.id);
+    return { done: [] };
   }
+  return { props: propertyLinksOf(fetched.page), summary };
+}
+
+/** 페이지 하나를 읽어 연결을 저장한다. 새로 발견한 페이지 ID를 돌려준다. `null`이면 일시 실패. */
+async function readOne(deps: CrawlDeps, id: string, crawl: string): Promise<string[] | null> {
+  const record = await deps.store.getPage(id);
+  if (!record) return [];
+  const loaded = await loadPage(deps, record, crawl);
+  if ('done' in loaded) return loaded.done;
   let targets: string[];
   try {
-    targets = await collectTargets(deps.request, id, fetched.page);
+    targets = await collectTargets(deps.request, id, loaded.props);
   } catch (error) {
     return handleReadError(deps, record, error);
   }
   const found = await discover(deps, targets);
   await deps.store.replaceLinks(id, targets);
+  const { summary } = loaded;
   await deps.store.putPage({
-    ...withoutReason(record),
-    title: summary.title,
-    kind: summary.kind,
-    url: summary.url,
-    lastEdited: summary.lastEdited,
-    ...(summary.parentPageId ? { parentPageId: summary.parentPageId } : {}),
+    ...settled(record),
+    ...(summary ? { title: summary.title, kind: summary.kind, url: summary.url, lastEdited: summary.lastEdited } : {}),
+    ...(summary?.parentPageId ? { parentPageId: summary.parentPageId } : {}),
     status: 'ok',
     failCount: 0,
-    readAt: iso(deps.now()),
+    // 속성은 받아 둔 시각의 것이라, "수정 직후에 읽었으면 다음에 한 번 더 읽기"(시험 S-4)가 그 시각을 기준으로 판단하게 한다
+    readAt: loaded.capturedAt ?? iso(deps.now()),
   });
   return found;
 }
@@ -208,13 +229,13 @@ async function cleanupPhase(deps: CrawlDeps, state: CrawlState, deadline: number
   for (const page of stale) {
     const stop = interrupted(deps, deadline);
     if (stop) return stop;
-    await recheck(deps, page);
+    await recheck(deps, page, state.startedAt);
   }
   await deps.store.putCrawl({ ...state, phase: 'read' });
   return 'next';
 }
 
-async function recheck(deps: CrawlDeps, page: PageRecord): Promise<void> {
+async function recheck(deps: CrawlDeps, page: PageRecord, crawl: string): Promise<void> {
   const checkedAt = iso(deps.now());
   const fetched = await fetchPage(deps.request, page.id);
   if (fetched.kind === 'unreadable') {
@@ -227,8 +248,19 @@ async function recheck(deps: CrawlDeps, page: PageRecord): Promise<void> {
     await deps.store.deletePage(page.id);
     return;
   }
-  if (summary && needsRead(page, summary)) {
-    await deps.store.putPage({ ...page, title: summary.title, lastEdited: summary.lastEdited, status: 'pending', checkedAt });
+  if (fetched.kind === 'ok' && summary && needsRead(page, summary)) {
+    // 읽을 때 페이지를 다시 받지 않으므로 위치·주소·종류도 여기서 새로 고친다
+    await deps.store.putPage({
+      ...page,
+      title: summary.title,
+      kind: summary.kind,
+      url: summary.url,
+      lastEdited: summary.lastEdited,
+      ...(summary.parentPageId ? { parentPageId: summary.parentPageId } : {}),
+      status: 'pending',
+      checkedAt,
+      prefetched: { ...propertyLinksOf(fetched.page), crawl, at: checkedAt },
+    });
     return;
   }
   await deps.store.putPage({ ...page, checkedAt });
@@ -241,7 +273,7 @@ async function readPhase(deps: CrawlDeps, state: CrawlState, deadline: number): 
     if (stop) return stop;
     const id = queue.shift();
     if (id === undefined) break;
-    const found = await readOne(deps, id);
+    const found = await readOne(deps, id, state.startedAt);
     if (found) queue.push(...found);
     await report(deps);
   }
