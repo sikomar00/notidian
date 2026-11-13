@@ -41,6 +41,19 @@ export async function optionsAndSeed(browser: Browser, check: Check): Promise<vo
   // 저장된 페이지가 없는 첫 실행에도 그래프 화면이 빈 안내를 보여 준다
   const empty = await browser.open(browser.ext('graph.html?mode=full'));
   await expect(check, empty, '그래프: 처음(데이터 없음)에는 빈 안내와 설정 열기', `!document.getElementById('empty').hidden && !document.getElementById('empty-settings').hidden`);
+  // 예시로 둘러보기(P2-7): 빈 화면의 버튼은 이 탭을 바꾸지 않고 예시 전용 탭을 연다(내 지도 탭이 예시로 남지 않게)
+  await empty.run(`document.getElementById('empty-demo').click()`);
+  await expect(check, empty, '예시: 버튼을 눌러도 이 탭은 그대로, 예시 탭을 따로 엶', `!location.search.includes('demo') && chrome.storage.session.get('demoTabId').then((s) => typeof s.demoTabId === 'number')`);
+  const demo = await browser.open(browser.ext('graph.html?mode=full&demo=1'));
+  await expect(check, demo, '예시: 띠가 보이고 그래프가 그려지며 내 지도 상태 줄은 숨김', `!document.getElementById('demo-banner').hidden && document.getElementById('status-row').hidden && !!document.querySelector('#graph canvas') && document.getElementById('empty').hidden`);
+  await demo.run(`document.getElementById('view-toggle').click()`);
+  await expect(check, demo, '예시: 목록에 예시 페이지 23개', `document.getElementById('list-body').rows.length === 23`, `document.getElementById('list-body').rows.length`);
+  await demo.run(`document.querySelector('#list-body tr button').click()`);
+  await expect(check, demo, '예시: Notion에서 열기는 안내만', `document.getElementById('notice').textContent.includes('예시 페이지라')`, `document.getElementById('notice').textContent`);
+  await demo.shot('demo');
+  await demo.run(`document.getElementById('demo-exit').click()`);
+  await expect(check, demo, '예시: 돌아가면 띠가 사라지고 원래(빈) 화면', `document.getElementById('demo-banner').hidden && !document.getElementById('empty').hidden`);
+  demo.close();
   empty.close();
   await page.run(SEED_SAMPLE);
   await expect(check, page, '설정: 토큰·지도 있으면 3단계가 지금 할 차례', `${STEPS} === 'done,done,active'`, STEPS);

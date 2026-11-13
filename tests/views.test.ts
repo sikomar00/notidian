@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { computeSteps } from '../src/extension/options/steps.ts';
 import { unknownDatabases } from '../src/extension/background/databaseNames.ts';
 import { buildGraph } from '../src/graph/buildGraph.ts';
+import { demoData } from '../src/graph/demoData.ts';
 import { applyFilters, hideIsolated, localSubgraph, SHOW_ALL } from '../src/graph/filter.ts';
 import type { PageRecord } from '../src/graph/types.ts';
 import { fetchDataSourceTitle } from '../src/notion/endpoints.ts';
@@ -125,4 +126,16 @@ test('DB 이름 읽기: 이름을 돌려주고, 읽을 수 없으면 undefined(P
   // 일시 오류는 "이름 없음"으로 굳히지 않도록 오류로 올린다
   fake.inject('/v1/data_sources/ds1', { status: 502, body: { code: 'bad_gateway' } });
   await assert.rejects(fetchDataSourceTitle(fake.request, 'ds1'), /502/);
+});
+
+test('예시 데이터: 모든 연결이 있는 페이지를 가리키고, 그래프 기능이 다 드러난다(P2-7)', () => {
+  const sample = demoData();
+  const ids = new Set(sample.pages.map((p) => p.id));
+  for (const link of sample.links) assert.ok(ids.has(link.from) && ids.has(link.to), `${link.from}→${link.to}`);
+  for (const page of sample.pages) if (page.parentPageId) assert.ok(ids.has(page.parentPageId), page.id);
+  const graph = buildGraph(sample.pages, sample.links, { hierarchy: false });
+  assert.ok(graph.nodes.some((n) => n.unreadable), '읽을 수 없는 페이지');
+  assert.ok(graph.nodes.some((n) => n.degree === 0), '연결 없는 페이지');
+  assert.equal(new Set(graph.nodes.flatMap((n) => (n.group ? [n.group] : []))).size, 3, 'DB 세 개');
+  for (const group of new Set(sample.pages.flatMap((p) => (p.databaseId ? [p.databaseId] : [])))) assert.ok(group in sample.databaseNames, group);
 });
