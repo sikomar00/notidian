@@ -6,6 +6,7 @@ import { openFullTab } from '../containers.ts';
 import { byId } from '../dom.ts';
 import type { IndexCommand, Message, SaveTokenReply, TokenKind } from '../messages.ts';
 import { describeProgress } from '../progressText.ts';
+import { computeSteps, STEP_STATE_TEXT } from './steps.ts';
 import { renderUnreadable } from './view.ts';
 
 const store = openIdbStore();
@@ -28,8 +29,28 @@ function startLabel(phase: Progress['phase']): string {
   return phase === 'done' ? '다시 만들기' : '연결 지도 만들기';
 }
 
+function renderSteps(): void {
+  byId('steps').replaceChildren(
+    ...computeSteps(hasToken, progress.phase).map((step) => {
+      const item = document.createElement('li');
+      item.dataset.state = step.state;
+      item.textContent = `${step.label} — ${STEP_STATE_TEXT[step.state]}`;
+      return item;
+    }),
+  );
+}
+
+function savedMessage(reply: Extract<SaveTokenReply, { ok: true }>): string {
+  if (reply.pageCount === undefined) return '토큰을 저장했어요. 이제 "연결 지도 만들기"를 눌러 주세요.';
+  if (reply.pageCount === 0) {
+    return '토큰을 저장했지만 읽을 수 있는 페이지가 아직 없어요. Notion에서 상위 페이지의 ⋯ → 연결로 이 연결을 추가한 뒤 "연결 지도 만들기"를 눌러 주세요. 방금 추가했다면 1분쯤 뒤에 누르세요.';
+  }
+  return `토큰을 저장했어요. 읽을 수 있는 페이지를 ${reply.pageCount}개${reply.more ? ' 이상' : ''} 찾았어요. 이제 "연결 지도 만들기"를 눌러 주세요.`;
+}
+
 // 토큰이 없으면 눌러도 오류만 나므로 시작 버튼을 끄고 이유를 보여 준다
 function render(): void {
+  renderSteps();
   byId('progress').textContent = describeProgress(progress);
   const running = progress.phase === 'running';
   startButton.textContent = startLabel(progress.phase);
@@ -74,7 +95,7 @@ byId('save-token').addEventListener('click', async () => {
   const reply = await send<SaveTokenReply>({ type: 'save-token', token: input.value, kind: selectedKind() });
   input.setAttribute('aria-invalid', String(!reply.ok));
   if (reply.ok) input.value = '';
-  status.textContent = reply.ok ? '토큰을 저장했어요. 이제 "연결 지도 만들기"를 눌러 주세요.' : reply.message;
+  status.textContent = reply.ok ? savedMessage(reply) : reply.message;
 });
 
 async function runCommand(command: IndexCommand): Promise<void> {

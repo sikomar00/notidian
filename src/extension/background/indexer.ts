@@ -1,4 +1,4 @@
-import { checkToken } from '../../notion/endpoints.ts';
+import { checkToken, probeAccess } from '../../notion/endpoints.ts';
 import { createNotionClient } from '../../notion/http.ts';
 import { withRetry } from '../../notion/retry.ts';
 import type { IndexCommand, SaveTokenReply, TokenKind } from '../messages.ts';
@@ -112,8 +112,9 @@ export async function handleIndexCommand(command: IndexCommand): Promise<void> {
 export async function saveToken(token: string, kind: TokenKind): Promise<SaveTokenReply> {
   const trimmed = token.trim();
   if (trimmed === '') return { ok: false, message: '토큰을 입력해 주세요.' };
+  const request = createNotionClient(trimmed);
   try {
-    const result = await checkToken(createNotionClient(trimmed));
+    const result = await checkToken(request);
     if (!result.ok) {
       const reason =
         result.status === 401
@@ -125,7 +126,9 @@ export async function saveToken(token: string, kind: TokenKind): Promise<SaveTok
     return { ok: false, message: 'Notion에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.' };
   }
   await chrome.storage.local.set({ token: trimmed, tokenKind: kind });
-  return { ok: true };
+  // 페이지를 연결에 추가하지 않은 채 끝내는 경우가 많아서, 저장 직후 읽을 수 있는 페이지 수를 알려 준다. 확인에 실패해도 저장은 그대로 둔다
+  const access = await probeAccess(request).catch(() => undefined);
+  return access ? { ok: true, pageCount: access.count, more: access.more } : { ok: true };
 }
 
 // 알람이 깨웠을 때, 중단·완료되지 않은 색인이면 이어서 돈다

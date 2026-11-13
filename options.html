@@ -18,6 +18,11 @@
       .token-row input { flex: 1 1 14em; min-width: 0; max-width: 24em; padding: 4px 6px; }
       .warning { border: 2px solid currentColor; padding: 8px 12px; font-weight: 600; }
       .hint { font-size: 13px; opacity: 0.85; }
+      .overview { border: 2px solid currentColor; padding: 12px 16px; }
+      .overview h2 { font-size: 16px; margin: 0 0 4px; }
+      #steps { margin: 4px 0 8px; }
+      #steps li[data-state="active"] { font-weight: 700; }
+      #steps li[data-state="todo"] { opacity: 0.75; }
       .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
       [hidden] { display: none !important; }
     </style>
@@ -25,6 +30,12 @@
   <body>
     <main>
       <h1>Notidian 설정</h1>
+
+      <section class="overview" aria-labelledby="overview-title">
+        <h2 id="overview-title">준비 상황</h2>
+        <ol id="steps"></ol>
+        <button id="open-graph" type="button">그래프 열기</button>
+      </section>
 
       <fieldset>
         <legend>1. 토큰 준비</legend>
@@ -70,8 +81,6 @@
         <p id="unreadable-summary"></p>
         <ul id="unreadable-list"></ul>
       </fieldset>
-
-      <p><button id="open-graph" type="button">그래프 열기</button></p>
     </main>
     <p id="progress-live" class="sr-only" aria-live="polite"></p>
     <script type="module" src="/src/extension/options/main.ts"></script>
