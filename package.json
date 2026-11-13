@@ -1,0 +1,22 @@
+{
+  "name": "notidian",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "노션에 옵시디언 기능을 붙이는 Chrome 확장",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test",
+    "build": "vite build && vite build --config vite.content.config.ts",
+    "qa": "vite --port 5173 --strictPort"
+  },
+  "dependencies": {
+    "@types/chrome": "0.3.7",
+    "force-graph": "1.52.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.8"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2"
+  }
+}

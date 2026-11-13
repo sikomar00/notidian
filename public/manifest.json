@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Notidian",
+  "version": "0.1.0",
+  "description": "노션에 옵시디언의 연결 그래프를 붙입니다.",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "sidePanel", "alarms"],
+  "host_permissions": ["https://api.notion.com/*", "https://app.notion.com/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Notidian 그래프 열기" },
+  "options_page": "options.html",
+  "side_panel": { "default_path": "graph.html?mode=side" },
+  "content_scripts": [{ "matches": ["https://app.notion.com/*"], "js": ["content.js"] }],
+  "web_accessible_resources": [{ "resources": ["graph.html"], "matches": ["https://app.notion.com/*"] }]
+}
