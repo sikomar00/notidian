@@ -66,6 +66,12 @@ export async function searchPagesOnce(
   return { results: listOf(body).map(asRecord), ...(nextCursor ? { nextCursor } : {}) };
 }
 
+/** 토큰으로 읽을 수 있는 페이지가 있는지 검색 한 번으로 미리 알아본다(저장 직후 "N개 찾았어요" 안내용). 100개가 넘으면 `more`. */
+export async function probeAccess(request: Requester): Promise<{ count: number; more: boolean }> {
+  const page = await searchPagesOnce(request);
+  return { count: page.results.length, more: page.nextCursor !== undefined };
+}
+
 /** 접근 가능한 모든 페이지를 검색으로 끝까지 받는다(시험용). */
 export async function searchAllPages(request: Requester): Promise<{ pages: NotionObject[]; requests: number }> {
   const pages: NotionObject[] = [];
