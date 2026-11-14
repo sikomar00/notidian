@@ -1,4 +1,4 @@
-import { buildGraph } from '../../graph/buildGraph.ts';
+import { buildGraph, UNTITLED } from '../../graph/buildGraph.ts';
 import { applyFilters, hideIsolated, localSubgraph, SHOW_ALL } from '../../graph/filter.ts';
 import type { KindFilter } from '../../graph/filter.ts';
 import { demoData } from '../../graph/demoData.ts';
@@ -15,6 +15,7 @@ import type { Message, ViewMode } from '../messages.ts';
 import { hasToken as tokenPresent, tokenChanged } from '../tokenStore.ts';
 import { renderDatabaseLegend } from './databaseLegend.ts';
 import { renderLinks } from './linksPanel.ts';
+import { createMentionsPanel } from './mentionsPanel.ts';
 import { followTabs } from './follow.ts';
 import { createListView } from './listview.ts';
 import { openDemoTab } from '../containers.ts';
@@ -97,11 +98,34 @@ function select(id: string | null): void {
 
 const localCenter = (): string | null => (localBox.checked && selectedId !== null && rowsById.has(selectedId) ? selectedId : null);
 
+// 연결 안 된 언급(S2-7): 예시 모드는 가짜 본문, 아니면 저장된 본문 글자
+const mentions = createMentionsPanel(demo ? async () => demoData().texts : () => store.listTexts(), openById);
+let indexing = false;
+// 만드는 동안에도 새로 모은 글자가 칸에 나오게 이 간격마다 다시 불러온다(F-21)
+const TEXT_REFRESH_MS = 5000;
+let textsLoadedAt = 0;
+
+function refreshMentions(): void {
+  mentions.invalidate();
+  textsLoadedAt = Date.now();
+  renderSelection();
+}
+
 function renderSelection(): void {
   const row = selectedId === null ? undefined : rowsById.get(selectedId);
   byId('selection').hidden = row === undefined;
   byId('sel-title').textContent = row?.title ?? '';
   renderLinks(row ? linkedPages(fullGraph, row.id) : undefined, select);
+  const target = row && !row.unreadable ? { id: row.id, title: pagesById.get(row.id)?.title ?? row.title } : undefined;
+  void mentions.render({
+    target,
+    linkedFrom: new Set(target ? rawLinks.filter((link) => link.to === target.id).map((link) => link.from) : []),
+    running: indexing,
+    titleOf: (id) => {
+      const page = pagesById.get(id);
+      return page ? page.title || UNTITLED : undefined;
+    },
+  });
 }
 
 const searchInput = byId<HTMLInputElement>('search');
@@ -212,6 +236,8 @@ const reloader = createReloader({
     rawPages = pages;
     rawLinks = links;
     pagesById = new Map(pages.map((page) => [page.id, page]));
+    // 제목이 바뀌었을 수 있어 본문 글자도 다시 준비한다
+    mentions.invalidate();
     rebuild();
   },
   onError: (error) => {
@@ -316,6 +342,10 @@ if (!demo) chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && progress) {
     status.setProgress(progress);
     reloader.schedule(progress.phase === 'running');
+    // 다 만들면 바로, 만드는 중에는 가끔 새로 모은 본문 글자로 칸을 다시 계산한다(F-21)
+    const finished = indexing && progress.phase !== 'running';
+    indexing = progress.phase === 'running';
+    if (finished || (indexing && selectedId !== null && Date.now() - textsLoadedAt > TEXT_REFRESH_MS)) refreshMentions();
   }
   if (tokenChanged(changes, area)) {
     void tokenPresent().then(status.setHasToken);
@@ -370,7 +400,9 @@ async function init(): Promise<void> {
   status.setHasToken(present);
   databaseNames = (local.databaseNames as Record<string, string> | undefined) ?? {};
   databaseNamesError = local.databaseNamesError as string | undefined;
-  status.setProgress((local.progress as Progress | undefined) ?? IDLE_PROGRESS);
+  const progress = (local.progress as Progress | undefined) ?? IDLE_PROGRESS;
+  status.setProgress(progress);
+  indexing = progress.phase === 'running';
   focusId = typeof session.focusPageId === 'string' ? session.focusPageId : null;
   pickCurrent = focusId !== null;
   await reloader.reload();

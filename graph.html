@@ -61,6 +61,13 @@
       .links .hint { font-size: 12px; margin: 0 0 2px; opacity: 0.8; }
       .links ul { list-style: none; margin: 0; padding: 0; }
       .links li button { border: none; padding: 1px 4px; text-align: left; text-decoration: underline; }
+      /* 연결 안 된 언급: 첫 줄 "제목 · N곳"(제목만 밑줄), 둘째 줄 앞뒤 글자. 찾은 글자는 색이 아니라 굵기로 표시한다 */
+      .links li button.mention { text-decoration: none; }
+      .mention .name { text-decoration: underline; }
+      .mention .snippet { display: block; font-size: 12px; }
+      /* 상태 안내는 좁은 화면에서도 보여야 해서 .hint(좁으면 숨김)를 쓰지 않는다 */
+      #mentions-note { font-size: 12px; margin: 0 0 2px; }
+      #mentions-note:empty { display: none; }
       /* 좁은 화면(옆 패널 등): 도구줄을 두 줄로 줄인다. 1줄 보기 방식+설정, 2줄 검색+목록, 범례는 작은 글씨로 모두 보이게 한다(옆으로 넘기면 숨은 항목을 못 찾는다) */
       @media (max-width: 480px) {
         header { padding: 6px 8px; }
@@ -169,6 +176,7 @@
       <div class="links">
         <section aria-labelledby="in-title"><h2 id="in-title">받은 연결</h2><p class="hint">이 페이지를 가리키는 페이지</p><ul id="sel-in"></ul></section>
         <section aria-labelledby="out-title"><h2 id="out-title">보낸 연결</h2><p class="hint">이 페이지가 가리키는 페이지</p><ul id="sel-out"></ul></section>
+        <section id="mentions" aria-labelledby="mention-title"><h2 id="mention-title">연결 안 된 언급</h2><p class="hint">제목이 연결 없이 글자로만 적힌 페이지(누르면 Notion에서 열기)</p><p id="mentions-note"></p><ul id="sel-mentions"></ul></section>
       </div>
     </section>
     <p id="live" class="sr-only" aria-live="polite"></p>
