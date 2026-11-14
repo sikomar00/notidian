@@ -10,8 +10,10 @@ import {
   searchPagesOnce,
 } from '../../notion/endpoints.ts';
 import type { NotionObject, Requester } from '../../notion/endpoints.ts';
-import { extractFromBlock, extractFromProperties } from '../../notion/extractLinks.ts';
+import { extractFromProperties } from '../../notion/extractLinks.ts';
 import { pageText, TEXT_VERSION } from '../../notion/extractText.ts';
+import { evidenceFromBlocks, evidenceFromProperties, mergeEvidence } from '../../notion/linkEvidence.ts';
+import type { EvidenceMap } from '../../notion/linkEvidence.ts';
 import { summarizePage } from '../../notion/pageMapping.ts';
 import type { PageSummary } from '../../notion/pageMapping.ts';
 import { RateLimitedError } from '../../notion/retry.ts';
@@ -68,6 +70,7 @@ const lastSeenAt = (page: PageRecord): string => [page.readAt ?? '', page.checke
 const propertyLinksOf = (page: NotionObject): PropertyLinks => ({
   targets: extractFromProperties(page.properties),
   overflow: overflowRelationIds(page),
+  evidence: [...evidenceFromProperties(page.properties)],
 });
 
 // 읽기를 마치면 읽지 못한 이유와 미리 뽑아 둔 연결을 지운다
@@ -120,19 +123,33 @@ async function searchPhase(deps: CrawlDeps, state: CrawlState, deadline: number)
   return 'next';
 }
 
-/** 페이지의 연결 대상과 본문 글자. 글자는 연결을 찾으려고 받은 블록에서 뽑아 요청이 늘지 않는다(NF-11). */
-async function collectTargets(request: Requester, id: string, props: PropertyLinks): Promise<{ targets: string[]; text: string }> {
+interface Collected {
+  targets: string[];
+  text: string;
+  evidence: EvidenceMap;
+}
+
+/** 페이지의 연결 대상·본문 글자·연결 근거. 모두 연결을 찾으려고 받은 블록에서 뽑아 요청이 늘지 않는다(NF-11·NF-15). */
+async function collectTargets(request: Requester, id: string, props: PropertyLinks): Promise<Collected> {
   const targets = new Set(props.targets);
+  const overflow: EvidenceMap = new Map();
   try {
-    for (const target of await readRelationOverflow(request, id, props.overflow)) targets.add(target);
+    // shortcut: 25개를 넘어 따로 읽은 relation 대상은 속성 이름 없이 "relation"만 남긴다. 이름이 필요하면 속성 ID → 이름을 함께 넘긴다
+    for (const target of await readRelationOverflow(request, id, props.overflow)) {
+      targets.add(target);
+      overflow.set(target, { kinds: ['relation'] });
+    }
   } catch (error) {
     // relation 일부를 못 읽어도 나머지 연결은 저장한다(권한 없는 대상 등)
     if (!(error instanceof NotionApiError) || isUnauthorized(error) || !reasonForStatus(error.status)) throw error;
   }
   const { blocks } = await readBlockTree(request, id);
-  for (const block of blocks) for (const target of extractFromBlock(block)) targets.add(target);
+  // 본문의 연결 대상은 근거를 뽑으며 함께 모은다(본문을 한 번만 훑는다)
+  const fromBlocks = evidenceFromBlocks(blocks);
+  for (const target of fromBlocks.keys()) targets.add(target);
   targets.delete(id);
-  return { targets: [...targets], text: pageText(blocks) };
+  const evidence = mergeEvidence(new Map(props.evidence ?? []), overflow, fromBlocks);
+  return { targets: [...targets], text: pageText(blocks), evidence };
 }
 
 async function markUnreadable(deps: CrawlDeps, record: PageRecord, reason: UnreadableReason): Promise<void> {
@@ -184,7 +201,8 @@ type Loaded = { props: PropertyLinks; summary?: PageSummary; capturedAt?: string
  * shortcut: 받아 둔 뒤 읽기 전에 휴지통으로 간 페이지는 이번엔 보통 점으로 남고, 다음 색인의 정리 단계에서 지워진다.
  */
 async function loadPage(deps: CrawlDeps, record: PageRecord, crawl: string): Promise<Loaded> {
-  if (record.prefetched?.crawl === crawl) return { props: record.prefetched, capturedAt: record.prefetched.at };
+  // 연결 근거 기능 전에 받아 둔 속성(근거 없음)은 쓰지 않고 다시 받는다. 쓰면 그 페이지의 속성 근거가 고칠 때까지 빈다
+  if (record.prefetched?.crawl === crawl && record.prefetched.evidence !== undefined) return { props: record.prefetched, capturedAt: record.prefetched.at };
   const fetched = await fetchPage(deps.request, record.id);
   if (fetched.kind === 'unreadable') {
     await markUnreadable(deps, record, fetched.reason);
@@ -208,15 +226,15 @@ async function readOne(deps: CrawlDeps, id: string, crawl: string): Promise<stri
   if (!record) return [];
   const loaded = await loadPage(deps, record, crawl);
   if ('done' in loaded) return loaded.done;
-  let collected: { targets: string[]; text: string };
+  let collected: Collected;
   try {
     collected = await collectTargets(deps.request, id, loaded.props);
   } catch (error) {
     return handleReadError(deps, record, error);
   }
-  const { targets, text } = collected;
+  const { targets, text, evidence } = collected;
   const found = await discover(deps, targets);
-  await deps.store.replaceLinks(id, targets);
+  await deps.store.replaceLinks(id, targets, evidence);
   // 글자를 먼저 저장한다. 그 사이에 끊기면 textVersion이 없어 다음에 다시 읽는다
   await deps.store.putText(id, text);
   const { summary } = loaded;

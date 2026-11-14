@@ -6,24 +6,33 @@ function addId(out: Set<string>, id: string | null): void {
   if (id) out.add(id);
 }
 
-function addUrl(out: Set<string>, url: unknown): void {
-  if (typeof url === 'string') addId(out, urlToPageId(url));
-}
+const pageOfUrl = (url: unknown): string | null => (typeof url === 'string' ? urlToPageId(url) : null);
 
-// 리치텍스트 한 조각(@언급, 텍스트 링크, 링크 멘션)에서 대상 페이지 ID를 모은다
-function collectFromRichTextItem(item: Json, out: Set<string>): void {
+/**
+ * 리치텍스트 한 조각(@언급, 텍스트 링크, 링크 멘션)이 가리키는 페이지와 그 종류. 연결 근거(linkEvidence.ts)와 함께 쓴다.
+ * @언급 조각에는 같은 페이지 주소(href)도 붙어 있어서, 먼저 찾은 종류(@언급)를 남긴다.
+ */
+export function richTextTargets(item: Json): { id: string; kind: 'mention' | 'link' }[] {
+  const found = new Map<string, 'mention' | 'link'>();
+  const add = (id: string | null, kind: 'mention' | 'link'): void => {
+    if (id && !found.has(id)) found.set(id, kind);
+  };
   const mention = item.mention;
   if (item.type === 'mention' && isRecord(mention)) {
     const page = mention.page;
-    if (mention.type === 'page' && isRecord(page) && typeof page.id === 'string') {
-      addId(out, normalizeId(page.id));
-    }
+    if (mention.type === 'page' && isRecord(page) && typeof page.id === 'string') add(normalizeId(page.id), 'mention');
     const linkMention = mention.link_mention;
-    if (mention.type === 'link_mention' && isRecord(linkMention)) addUrl(out, linkMention.href);
+    if (mention.type === 'link_mention' && isRecord(linkMention)) add(pageOfUrl(linkMention.href), 'link');
   }
   const link = isRecord(item.text) ? item.text.link : undefined;
-  if (isRecord(link)) addUrl(out, link.url);
-  addUrl(out, item.href);
+  if (isRecord(link)) add(pageOfUrl(link.url), 'link');
+  add(pageOfUrl(item.href), 'link');
+  return [...found].map(([id, kind]) => ({ id, kind }));
+}
+
+// 리치텍스트 한 조각에서 대상 페이지 ID를 모은다
+function collectFromRichTextItem(item: Json, out: Set<string>): void {
+  for (const target of richTextTargets(item)) addId(out, target.id);
 }
 
 // 캡션·표 칸·토글 제목 등 어디에 묻혀 있어도 찾도록 값 전체를 훑는다

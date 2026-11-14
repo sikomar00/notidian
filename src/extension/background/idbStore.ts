@@ -1,4 +1,4 @@
-import type { PageRecord, RawLink } from '../../graph/types.ts';
+import type { LinkEvidence, PageRecord, RawLink } from '../../graph/types.ts';
 import type { Counts, CrawlState, IndexStore, StoredText } from './types.ts';
 
 const DB_NAME = 'notidian';
@@ -97,11 +97,14 @@ class IdbStore implements IndexStore {
     return request<string[]>(tx.objectStore('pages').index('status').getAllKeys('pending') as IDBRequest<string[]>);
   }
 
-  async replaceLinks(from: string, targets: readonly string[]): Promise<void> {
+  async replaceLinks(from: string, targets: readonly string[], evidence?: ReadonlyMap<string, LinkEvidence>): Promise<void> {
     const tx = await this.stores(['links'], 'readwrite');
     const links = tx.objectStore('links');
     await deleteLinksBy(links, 'from', from);
-    for (const to of new Set(targets)) links.put({ from, to });
+    for (const to of new Set(targets)) {
+      const found = evidence?.get(to);
+      links.put({ from, to, ...(found ? { evidence: found } : {}) } satisfies RawLink);
+    }
     await finished(tx);
   }
 

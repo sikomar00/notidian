@@ -1,4 +1,4 @@
-import type { PageRecord, RawLink, StoredText } from '../../graph/types.ts';
+import type { LinkEvidence, PageRecord, RawLink, StoredText } from '../../graph/types.ts';
 
 export type { StoredText };
 
@@ -25,8 +25,8 @@ export interface IndexStore {
   deletePage(id: string): Promise<void>;
   listPages(): Promise<PageRecord[]>;
   pendingIds(): Promise<string[]>;
-  /** `from` 페이지의 나가는 연결을 통째로 바꾼다. */
-  replaceLinks(from: string, targets: readonly string[]): Promise<void>;
+  /** `from` 페이지의 나가는 연결을 통째로 바꾼다. `evidence`는 대상마다 연결 근거(F-28). */
+  replaceLinks(from: string, targets: readonly string[], evidence?: ReadonlyMap<string, LinkEvidence>): Promise<void>;
   allLinks(): Promise<RawLink[]>;
   /** 페이지 본문 글자를 저장한다(연결 안 된 언급용). 빈 문자열이면 지운다. */
   putText(id: string, text: string): Promise<void>;

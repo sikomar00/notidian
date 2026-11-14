@@ -51,10 +51,13 @@ export type Context = Pick<Mention, 'before' | 'match' | 'after'>;
 /** 원문 줄에서 찾은 곳과 앞뒤 30자(잘렸으면 "…"). */
 export function contextAt(line: string, at: number, length: number): Context {
   const end = at + length;
+  // 30자로 자를 때 이모지 같은 두 칸짜리 글자가 반으로 갈리면 그 반쪽을 버린다
+  const before = line.slice(Math.max(0, at - CONTEXT), at).replace(/^[\uDC00-\uDFFF]/, '');
+  const after = line.slice(end, end + CONTEXT).replace(/[\uD800-\uDBFF]$/, '');
   return {
-    before: (at > CONTEXT ? '…' : '') + line.slice(Math.max(0, at - CONTEXT), at),
+    before: (at > CONTEXT ? '…' : '') + before,
     match: line.slice(at, end),
-    after: line.slice(end, end + CONTEXT) + (line.length - end > CONTEXT ? '…' : ''),
+    after: after + (line.length - end > CONTEXT ? '…' : ''),
   };
 }
 
