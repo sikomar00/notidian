@@ -1,10 +1,20 @@
 # Notidian
 
+[![CI](https://github.com/sikomar00/notidian/actions/workflows/ci.yml/badge.svg)](https://github.com/sikomar00/notidian/actions/workflows/ci.yml)
+
 노션 페이지들이 서로 어떻게 이어져 있는지 **연결 그래프**로 보여 주는 Chrome 확장이에요. 옵시디언의 그래프·백링크를 노션에서 쓰고 싶어서 만들었어요.
 
 > 아직 개인용 단계예요. 크롬 웹스토어에는 올리지 않았고, 압축을 푼 확장으로 직접 올려 써요.
 
 <img src="public/icons/icon-128.png" width="64" alt="Notidian 아이콘: 파란 점 둘과 주황 네모 하나를 선으로 이은 모양">
+
+![예시 데이터로 연 연결 그래프. 고른 페이지의 받은·보낸 연결과 근거, 다른 페이지까지의 경로가 오른쪽 패널에 나와요](docs/images/readme/graph-path.png)
+
+| 색 그룹과 보기·내보내기 |
+|---|
+| ![제목에 "회의"가 든 페이지를 보라색으로 칠한 그래프와 보기·내보내기 메뉴](docs/images/readme/graph-color-groups.png) |
+
+> 그림은 모두 확장에 들어 있는 **가짜 예시 데이터**로 찍었어요(`npm run qa:e2e`가 헤드리스 Chrome으로 만든 화면). 실제 노션 내용은 들어 있지 않아요.
 
 ## 할 수 있는 것
 
