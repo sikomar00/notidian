@@ -24,8 +24,14 @@ const LATIN_OR_DIGIT = /[\p{Script=Latin}\p{N}]/u;
 // shortcut: 소문자로 바꿔 길이가 달라지는 문자(터키어 İ 등)가 있으면 앞뒤 글자 위치가 어긋난다. 그런 제목이 실제로 나오면 위치를 원문 기준으로 다시 찾는다
 const fold = (text: string): string => text.normalize('NFC').toLowerCase();
 
+/** 비교용 제목(NFC·소문자). 너무 짧거나(2글자 이하) 제목이 없으면 null — 찾지 않는다. */
+export function normalizeTitle(title: string): string | null {
+  const folded = fold(title.trim());
+  return EMPTY_TITLES.has(folded) || [...folded].length < MIN_TITLE ? null : folded;
+}
+
 // 제목 끝이 라틴 문자·숫자이면 바로 바깥도 그렇지 않아야 한다("art"는 "start"에서 안 찾음). 한글 쪽은 조사가 붙으니 보지 않는다
-function atBoundary(line: string, start: number, title: string): boolean {
+export function atBoundary(line: string, start: number, title: string): boolean {
   const end = start + title.length;
   const edge = (inside: string | undefined, outside: string | undefined): boolean =>
     !(inside && outside && LATIN_OR_DIGIT.test(inside) && LATIN_OR_DIGIT.test(outside));
@@ -40,9 +46,10 @@ function positions(line: string, title: string): number[] {
   return found;
 }
 
-type Context = Pick<Mention, 'before' | 'match' | 'after'>;
+export type Context = Pick<Mention, 'before' | 'match' | 'after'>;
 
-function contextAt(line: string, at: number, length: number): Context {
+/** 원문 줄에서 찾은 곳과 앞뒤 30자(잘렸으면 "…"). */
+export function contextAt(line: string, at: number, length: number): Context {
   const end = at + length;
   return {
     before: (at > CONTEXT ? '…' : '') + line.slice(Math.max(0, at - CONTEXT), at),
@@ -82,8 +89,8 @@ export function findUnlinkedMentions(
   pages: readonly PreparedText[],
   linkedFrom: ReadonlySet<string>,
 ): Mention[] | 'too-short' {
-  const title = fold(target.title.trim());
-  if (EMPTY_TITLES.has(title) || [...title].length < MIN_TITLE) return 'too-short';
+  const title = normalizeTitle(target.title);
+  if (title === null) return 'too-short';
   const found: Mention[] = [];
   for (const page of pages) {
     if (page.id === target.id || linkedFrom.has(page.id)) continue;
