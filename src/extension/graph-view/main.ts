@@ -6,7 +6,7 @@ import type { KindFilter } from '../../graph/filter.ts';
 import { demoData } from '../../graph/demoData.ts';
 import { buildRows, linkedPages } from '../../graph/rows.ts';
 import type { NodeRow } from '../../graph/rows.ts';
-import type { GraphData, PageRecord, RawLink } from '../../graph/types.ts';
+import type { GraphData, LinkEvidence, PageRecord, RawLink } from '../../graph/types.ts';
 import { pageUrl } from '../../notion/urlToPageId.ts';
 import { openIdbStore } from '../background/idbStore.ts';
 import { IDLE_PROGRESS } from '../background/types.ts';
@@ -19,6 +19,7 @@ import { renderDatabaseLegend } from './databaseLegend.ts';
 import { renderLinks } from './linksPanel.ts';
 import { createMentionsController } from './mentionsController.ts';
 import { setupRadioGroup } from './radioGroup.ts';
+import { createPathPanel } from './pathPanel.ts';
 import { followTabs } from './follow.ts';
 import { createListView } from './listview.ts';
 import { openDemoTab } from '../containers.ts';
@@ -106,6 +107,28 @@ function select(id: string | null): void {
 const localCenter = (): string | null => (localBox.checked && selectedId !== null && rowsById.has(selectedId) ? selectedId : null);
 
 // 연결 안 된 언급(S2-7)·언급 정리(S2-8): 예시 모드는 가짜 본문, 아니면 저장된 본문 글자
+// 연결 근거(F-28): `from\u0000to` → 근거. 저장된 지도를 다시 읽을 때 새로 만든다
+let evidenceByKey = new Map<string, LinkEvidence | undefined>();
+const evidenceOf = (from: string, to: string): LinkEvidence | undefined => evidenceByKey.get(`${from}\u0000${to}`);
+function setLinks(links: RawLink[]): void {
+  rawLinks = links;
+  evidenceByKey = new Map(links.map((link) => [`${link.from}\u0000${link.to}`, link.evidence]));
+}
+// 경로 찾기(F-31): 고른 페이지에서 다른 페이지까지
+let currentPath: string[] | null = null;
+const paths = createPathPanel({
+  graph: () => fullGraph,
+  titleOf: (id) => rowsById.get(id)?.title ?? id,
+  hasLink: (from, to) => evidenceByKey.has(`${from}\u0000${to}`),
+  evidenceOf,
+  drawn: (id) => lastGraph.nodes.some((node) => node.id === id),
+  onPath: (ids) => {
+    // 그래프가 아직 없으면(목록 보기로 열었을 때) 기억해 두었다가 그래프를 만들 때 넘긴다
+    currentPath = ids;
+    view?.setPath(ids);
+  },
+});
+
 const mentions = createMentionsController({
   demo,
   loadTexts: demo ? async () => demoData().texts : () => store.listTexts(),
@@ -119,7 +142,10 @@ function renderSelection(): void {
   const row = selectedId === null ? undefined : rowsById.get(selectedId);
   byId('selection').hidden = row === undefined;
   byId('sel-title').textContent = row?.title ?? '';
-  renderLinks(row ? linkedPages(fullGraph, row.id) : undefined, select);
+  renderLinks(row ? linkedPages(fullGraph, row.id) : undefined, select, (other, direction) =>
+    row ? (direction === 'in' ? evidenceOf(other, row.id) : evidenceOf(row.id, other)) : undefined,
+  );
+  paths.setSource(row && !row.unreadable ? row.id : null);
   mentions.drawer(row && !row.unreadable ? { id: row.id, title: pagesById.get(row.id)?.title ?? row.title } : undefined);
 }
 
@@ -168,6 +194,8 @@ function refreshView(): void {
   const next = drawnGraph();
   const changed = next !== lastGraph;
   lastGraph = next;
+  // 주변만 보기가 바뀌면 그래프에 그려지는 길도 달라진다
+  paths.refresh();
   renderEmpty();
   renderLocalControls();
   const target = ensureView();
@@ -186,8 +214,9 @@ function ensureView(): GraphView | undefined {
       if (autoFit) view?.fit();
     },
   });
-  // 옆 패널처럼 그래프를 늦게 만들면 그 전에 정한 DB별 색을 넘긴다
+  // 옆 패널처럼 그래프를 늦게 만들면 그 전에 정한 DB별 색과 찾아 둔 경로를 넘긴다
   view.setGroupColors(groupColors);
+  view.setPath(currentPath);
   return view;
 }
 
@@ -212,13 +241,17 @@ function rebuild(): void {
   // 숨겨진 목록은 다시 그리지 않고, 보일 때 그린다
   if (shown === 'list') list.setRows(rows);
   mentions.rebuilt();
-  search.setItems(fullGraph.nodes.filter((node) => !node.unreadable));
+  const readable = fullGraph.nodes.filter((node) => !node.unreadable);
+  search.setItems(readable);
+  paths.setItems(readable);
   if (pickCurrent && focusId !== null && rowsById.has(focusId)) {
     pickCurrent = false;
     selectedId = focusId;
   }
   if (selectedId !== null && !rowsById.has(selectedId)) selectedId = null;
   lastGraph = drawnGraph();
+  // 범례·보기 옵션·새 데이터로 그래프가 바뀌면 찾아 둔 경로도 다시 구한다
+  paths.refresh();
   renderEmpty();
   renderLocalControls();
   renderSelection();
@@ -231,7 +264,7 @@ const reloader = createReloader({
   read: () => Promise.all([store.listPages(), store.allLinks()]),
   onData: (pages, links) => {
     rawPages = pages;
-    rawLinks = links;
+    setLinks(links);
     pagesById = new Map(pages.map((page) => [page.id, page]));
     // 제목이 바뀌었을 수 있어 본문 글자도 다시 준비한다
     mentions.dataReloaded();
@@ -412,7 +445,7 @@ async function init(): Promise<void> {
 function showDemo(): void {
   const sample = demoData();
   rawPages = sample.pages;
-  rawLinks = sample.links;
+  setLinks(sample.links);
   pagesById = new Map(sample.pages.map((page) => [page.id, page]));
   databaseNames = sample.databaseNames;
   databaseNamesError = undefined;

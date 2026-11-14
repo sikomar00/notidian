@@ -30,7 +30,8 @@ function renderOptions(el: SearchElements, state: SearchState, pick: (item: Sear
   el.list.replaceChildren(
     ...state.results.map((item, index) => {
       const option = document.createElement('li');
-      option.id = `search-option-${index}`;
+      // 검색칸이 둘(제목 검색·경로 찾기)이라 후보 ID에 목록 ID를 붙여 겹치지 않게 한다
+      option.id = `${el.list.id}-option-${index}`;
       option.role = 'option';
       option.textContent = item.title;
       option.setAttribute('aria-selected', String(index === state.active));
@@ -43,7 +44,7 @@ function renderOptions(el: SearchElements, state: SearchState, pick: (item: Sear
   );
   el.list.hidden = state.results.length === 0;
   el.input.setAttribute('aria-expanded', String(state.results.length > 0));
-  if (state.active >= 0) el.input.setAttribute('aria-activedescendant', `search-option-${state.active}`);
+  if (state.active >= 0) el.input.setAttribute('aria-activedescendant', `${el.list.id}-option-${state.active}`);
   else el.input.removeAttribute('aria-activedescendant');
 }
 

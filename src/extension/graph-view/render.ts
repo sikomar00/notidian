@@ -1,6 +1,8 @@
 import ForceGraph from 'force-graph';
 import { neighborMap } from '../../graph/neighbors.ts';
 import type { GraphData, GraphLink, GraphNode } from '../../graph/types.ts';
+import { fitLabel, LABEL_PRIORITY, labelPriority, MAX_LABEL_WIDTH, pickLabels, pullFor } from './labels.ts';
+import type { LabelBox } from './labels.ts';
 import type { Palette } from './palette.ts';
 
 type ViewNode = GraphNode & { x?: number; y?: number; vx?: number; vy?: number };
@@ -16,6 +18,8 @@ export interface GraphView {
   resize(width: number, height: number): void;
   /** DB 항목을 DB별 색으로 칠한다(null이면 한 색). */
   setGroupColors(colors: Map<string, string> | null): void;
+  /** 경로 찾기의 길(점 ID 차례)을 굵은 선과 이름표로 강조한다. null이면 지운다(F-31) */
+  setPath(ids: readonly string[] | null): void;
 }
 
 interface ViewState {
@@ -29,11 +33,17 @@ interface ViewState {
   thinLinks: boolean;
   /** DB별 색을 켰을 때 DB 번호 → 색. 꺼져 있으면 null(모든 DB 항목이 같은 색) */
   groupColors: Map<string, string> | null;
+  /** 가운데로 당기는 힘(가로·세로). 화면 모양에 따라 바뀐다 */
+  pull: { x: number; y: number };
+  /** 경로 찾기의 길 위 점과 선(양쪽 방향 열쇠 `a\u0000b`) */
+  pathNodes: Set<string>;
+  pathLinks: Set<string>;
 }
 
 const LABEL_ZOOM = 1.6;
-// 이 수 이하의 점이면 모든 이름표에 바탕색 테두리를 그린다(2,000점 그리기 속도 측정 기준을 지키려고 그 위로는 강조한 이름표에만)
-const HALO_NODE_LIMIT = 500;
+// 한 화면에 놓는 이름표 수 상한. 겹침 검사가 개수의 제곱으로 늘고, 이보다 많으면 어차피 읽을 수 없다
+const MAX_LABELS = 150;
+const LABEL_FONT = "system-ui, 'Segoe UI', 'Malgun Gothic', sans-serif";
 const ARROW_LENGTH = 6;
 const WARMUP_TICKS = 80;
 const FOCUS_ZOOM = 3;
@@ -70,12 +80,15 @@ const radiusOf = (node: GraphNode): number => 4 + Math.sqrt(node.degree) * 2;
 const idOf = (end: unknown): string => (typeof end === 'object' && end !== null ? (end as { id: string }).id : String(end));
 
 function isRelated(state: ViewState, id: string): boolean {
-  if (state.hoverId === null) return true;
+  // 경로 위의 점은 다른 점에 마우스를 올려도 흐리게 하지 않는다(길 전체가 보이게)
+  if (state.hoverId === null || state.pathNodes.has(id)) return true;
   return id === state.hoverId || state.neighbors.get(state.hoverId)?.has(id) === true;
 }
 
 function isActive(state: ViewState, link: GraphLink): boolean {
-  return state.hoverId !== null && (idOf(link.source) === state.hoverId || idOf(link.target) === state.hoverId);
+  const [source, target] = [idOf(link.source), idOf(link.target)];
+  if (state.pathLinks.has(`${source}\u0000${target}`)) return true;
+  return state.hoverId !== null && (source === state.hoverId || target === state.hoverId);
 }
 
 // 그래프 좌표 (x, y)에 가장 가까운 점. 점 가장자리에서 2만큼 여유를 둔다
@@ -126,30 +139,87 @@ function drawNode(state: ViewState, node: ViewNode, ctx: CanvasRenderingContext2
     ctx.fillStyle = node.kind === 'page' ? palette.page : dbItemColor(state, node);
     fillShape(ctx, node, radius);
   }
+  if (state.pathNodes.has(node.id) && node.id !== state.focusId) {
+    // 경로 위의 점은 굵은 선과 같은 색 테두리로 표시한다
+    ctx.lineWidth = 2 / scale;
+    ctx.strokeStyle = palette.linkActive;
+    ctx.beginPath();
+    ctx.arc(node.x ?? 0, node.y ?? 0, radius + FOCUS_RING, 0, 2 * Math.PI);
+    ctx.stroke();
+  }
   if (node.id === state.focusId) {
     ctx.lineWidth = 2 / scale;
     ctx.strokeStyle = palette.focus;
     ctx.strokeRect((node.x ?? 0) - radius - FOCUS_RING, (node.y ?? 0) - radius - FOCUS_RING, (radius + FOCUS_RING) * 2, (radius + FOCUS_RING) * 2);
   }
-  const emphasized =
-    node.id === state.focusId || state.hubIds.has(node.id) || (state.hoverId !== null && isRelated(state, node.id));
-  if (scale > LABEL_ZOOM || emphasized) {
-    const labelY = (node.y ?? 0) + radius + 11 / scale;
-    ctx.save();
-    ctx.font = `${12 / scale}px system-ui, 'Segoe UI', 'Malgun Gothic', sans-serif`;
-    ctx.textAlign = 'center';
-    // 이름표 둘레를 바탕색으로 한 번 그려 선·다른 이름표와 겹쳐도 읽히게 한다. 글자 테두리는 비싸서 점이 많으면 강조한 이름표에만
-    if (emphasized || state.nodes.size <= HALO_NODE_LIMIT) {
-      ctx.lineJoin = 'round';
-      ctx.lineWidth = 3 / scale;
-      ctx.strokeStyle = palette.background;
-      ctx.strokeText(node.title, node.x ?? 0, labelY);
-    }
-    ctx.fillStyle = palette.text;
-    ctx.fillText(node.title, node.x ?? 0, labelY);
-    ctx.restore();
-  }
   ctx.globalAlpha = 1;
+}
+
+interface Frame {
+  scale: number;
+  /** 보이는 범위(그래프 좌표) */
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+// 제목마다 12px 글자 폭과 말줄임한 글자를 한 번만 잰다(프레임마다 재면 점이 많을 때 느리다)
+const labelCache = new Map<string, { text: string; width: number }>();
+let measureContext: CanvasRenderingContext2D | null = null;
+function labelOf(title: string): { text: string; width: number } {
+  const known = labelCache.get(title);
+  if (known) return known;
+  measureContext ??= document.createElement('canvas').getContext('2d');
+  if (!measureContext) return { text: title, width: title.length * 7 };
+  measureContext.font = `12px ${LABEL_FONT}`;
+  const fitted = fitLabel(title, (text) => measureContext?.measureText(text).width ?? text.length * 7);
+  labelCache.set(title, fitted);
+  return fitted;
+}
+
+function labelCandidates(state: ViewState, frame: Frame): LabelBox[] {
+  const { scale } = frame;
+  const height = 12 / scale;
+  // 점이 화면 가장자리 바로 밖이어도 이름표 반쪽은 보일 수 있어 그만큼 넓게 본다
+  const reachX = MAX_LABEL_WIDTH / 2 / scale;
+  const reachY = 24 / scale;
+  const candidates: LabelBox[] = [];
+  for (const node of state.nodes.values()) {
+    const [x, y] = [node.x, node.y];
+    if (x === undefined || y === undefined) continue;
+    if (x < frame.left - reachX || x > frame.right + reachX || y < frame.top - reachY || y > frame.bottom + reachY) continue;
+    // 경로 위의 점은 이웃처럼 이름을 보여 준다
+    const priority = state.pathNodes.has(node.id) ? Math.min(labelPriority(state, node.id), LABEL_PRIORITY.related) : labelPriority(state, node.id);
+    if (priority === LABEL_PRIORITY.other && scale <= LABEL_ZOOM) continue;
+    const { text, width: width12 } = labelOf(node.title);
+    const width = width12 / scale;
+    const always = priority <= LABEL_PRIORITY.hover;
+    candidates.push({ id: node.id, text, x: x - width / 2, y: y + radiusOf(node) + 11 / scale - height, width, height: height * 1.25, priority, weight: node.degree, always });
+  }
+  return candidates;
+}
+
+/**
+ * 점을 다 그린 뒤 이름표를 한꺼번에 놓는다. 중요한 것부터 놓고 겹치는 것은 건너뛰어(pickLabels) 이름이 서로 덮이지 않게 하고,
+ * 둘레를 바탕색으로 한 번 그려 선 위에서도 읽히게 한다.
+ */
+function drawLabels(state: ViewState, ctx: CanvasRenderingContext2D, frame: Frame): void {
+  const { scale } = frame;
+  ctx.save();
+  ctx.font = `${12 / scale}px ${LABEL_FONT}`;
+  ctx.textAlign = 'center';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 3 / scale;
+  ctx.strokeStyle = state.palette.background;
+  ctx.fillStyle = state.palette.text;
+  for (const label of pickLabels(labelCandidates(state, frame), MAX_LABELS)) {
+    const [x, baseline] = [label.x + label.width / 2, label.y + 12 / scale];
+    ctx.globalAlpha = isRelated(state, label.id) ? 1 : 0.25;
+    ctx.strokeText(label.text, x, baseline);
+    ctx.fillText(label.text, x, baseline);
+  }
+  ctx.restore();
 }
 
 // 화살표가 도착하는 점의 가장자리에 놓이도록 선 위의 비율을 구한다
@@ -236,13 +306,15 @@ function setupHover(
   container.addEventListener('mouseleave', () => hover(null));
 }
 
-// 연결 없는 점은 밀려나 계속 멀어져서 전체 보기가 아주 작아진다. 모든 점을 원점(가운데)으로 약하게 당긴다
-function gravity(strength: number): ((alpha: number) => void) & { initialize: (nodes: ViewNode[]) => void } {
+// 연결 없는 점은 밀려나 계속 멀어져서 전체 보기가 아주 작아진다. 모든 점을 원점(가운데)으로 약하게 당긴다.
+// 화면이 가로로 길면 세로로 더 세게 당겨 그래프가 화면 모양을 따라 퍼지게 한다(가운데 작은 덩어리로 몰리지 않게)
+function gravity(strength: () => { x: number; y: number }): ((alpha: number) => void) & { initialize: (nodes: ViewNode[]) => void } {
   let nodes: ViewNode[] = [];
   const force = (alpha: number): void => {
+    const { x, y } = strength();
     for (const node of nodes) {
-      node.vx = (node.vx ?? 0) - (node.x ?? 0) * strength * alpha;
-      node.vy = (node.vy ?? 0) - (node.y ?? 0) * strength * alpha;
+      node.vx = (node.vx ?? 0) - (node.x ?? 0) * x * alpha;
+      node.vy = (node.vy ?? 0) - (node.y ?? 0) * y * alpha;
     }
   };
   return Object.assign(force, { initialize: (next: ViewNode[]) => void (nodes = next) });
@@ -349,8 +421,18 @@ function createController(graph: ViewGraph, state: ViewState, redraw: () => void
       state.groupColors = colors;
       redraw();
     },
+    setPath(ids) {
+      state.pathNodes = new Set(ids ?? []);
+      state.pathLinks = new Set((ids ?? []).slice(1).flatMap((id, index) => {
+        const previous = ids?.[index] ?? '';
+        return [`${previous}\u0000${id}`, `${id}\u0000${previous}`];
+      }));
+      redraw();
+    },
     resize(width, height) {
       graph.width(width).height(height);
+      // 화면 모양에 맞춰 당기는 힘을 나눈다. 다음에 배치가 움직일 때부터 반영된다. 숨겨진 동안(크기 0)은 그대로 둔다
+      state.pull = pullFor(width, height, GRAVITY) ?? state.pull;
     },
   };
 }
@@ -360,9 +442,13 @@ export function createGraphView(
   palette: Palette,
   handlers: { onNodeClick: (node: GraphNode) => void; onSettled?: () => void },
 ): GraphView {
-  const state: ViewState = { palette, hoverId: null, focusId: null, hubIds: new Set(), neighbors: new Map(), nodes: new Map(), groupColors: null, thinLinks: false };
+  const state: ViewState = { palette, hoverId: null, focusId: null, hubIds: new Set(), neighbors: new Map(), nodes: new Map(), groupColors: null, thinLinks: false, pull: { x: GRAVITY, y: GRAVITY }, pathNodes: new Set(), pathLinks: new Set() };
   const graph = configureGraph(container, state, (node) => handlers.onNodeClick(node));
-  graph.d3Force('gravity', gravity(GRAVITY));
+  graph.d3Force('gravity', gravity(() => state.pull));
+  graph.onRenderFramePost((ctx, scale) => {
+    const [topLeft, bottomRight] = [graph.screen2GraphCoords(0, 0), graph.screen2GraphCoords(graph.width(), graph.height())];
+    drawLabels(state, ctx, { scale, left: topLeft.x, top: topLeft.y, right: bottomRight.x, bottom: bottomRight.y });
+  });
   // 배치 계산의 대부분이 점끼리 밀어내는 힘이라(프로파일 2,000점 기준 약 65%), 먼 점끼리는 계산하지 않는다
   graph.d3Force('charge')?.distanceMax?.(CHARGE_REACH);
   if (handlers.onSettled) graph.onEngineStop(handlers.onSettled);

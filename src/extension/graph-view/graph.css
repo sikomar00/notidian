@@ -11,17 +11,17 @@ header { padding: 8px 12px; border-bottom: 1px solid var(--border); background: 
 .combo { position: relative; }
 .combo label { display: flex; }
 .combo .icon { position: absolute; left: 8px; top: 50%; translate: 0 -50%; color: var(--muted); pointer-events: none; }
-#search { width: 100%; padding-left: 30px; }
+#search, #path-search { width: 100%; padding-left: 30px; }
 /* 넓은 화면은 보이는 라벨이 있어서 같은 말이 두 번 보이지 않게 안내 문구를 감춘다 */
 #search::placeholder { color: transparent; }
 .search-label { align-self: center; margin-right: 8px; white-space: nowrap; }
 .combo label { align-items: center; }
 .combo .search-box { position: relative; flex: 1; display: flex; }
-#search-list { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; min-width: 100%; max-height: 40vh; margin: 0; padding: 4px; overflow: auto; list-style: none; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); box-sizing: border-box; }
-#search-list li { padding: 4px 8px; border-radius: 4px; cursor: pointer; }
-#search-list li:hover { background: var(--hover); }
+.search-list { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; min-width: 100%; max-height: 40vh; margin: 0; padding: 4px; overflow: auto; list-style: none; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); box-sizing: border-box; }
+.search-list li { padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+.search-list li:hover { background: var(--hover); }
 /* 고른 후보는 바탕만이 아니라 왼쪽 강조 막대(3:1 이상)와 굵기로도 알린다 */
-#search-list li[aria-selected='true'] { background: var(--pressed); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+.search-list li[aria-selected='true'] { background: var(--pressed); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
 /* 범례 칩: 눌러서 그 종류를 숨기거나 보인다. 숨긴 상태는 색이 아니라 줄긋기·흐림으로도 알린다 */
 .legend > [role='group'] { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .legend button.kind { min-height: 26px; padding: 2px 10px; border-radius: 999px; }
@@ -52,7 +52,8 @@ header { padding: 8px 12px; border-bottom: 1px solid var(--border); background: 
 #status-row button { font-size: 13px; color: var(--text); }
 /* 알림 칸은 비어 있어도 감추지 않는다(감추면 화면 읽기 프로그램이 첫 알림을 놓친다). 글이 있을 때만 상자 모양 */
 #notice:not(:empty) { margin-top: 6px; padding: 6px 10px; font-size: 13px; background: var(--surface); border-radius: var(--radius); }
-main { flex: 1; min-height: 0; position: relative; }
+.workspace { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+main { flex: 1; min-height: 0; min-width: 0; position: relative; }
 #graph-area, #list-view, #cleanup-view { position: absolute; inset: 0; }
 #graph { position: absolute; inset: 0; overflow: hidden; }
 .zoom { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; padding: 2px; background: var(--bg); border: 1px solid var(--border); border-radius: calc(var(--radius) + 2px); box-shadow: var(--shadow); }
@@ -107,4 +108,24 @@ td button { min-height: 24px; padding: 1px 8px; font-size: 12px; }
   .segmented button { padding: 2px 8px; }
   .legend { font-size: 13px; }
   .legend button.kind { padding: 2px 8px; }
+}
+/* 연결 근거(F-28·F-29): 받은·보낸 연결 줄 아래 작은 글씨. 경로 찾기 결과도 같은 모양 */
+.evidence { display: block; padding: 0 6px 4px; font-size: 12px; color: var(--muted); }
+.evidence .snippet { display: inline; }
+.evidence .snippet strong { color: var(--text); }
+#path .combo { margin: 4px 0 6px; }
+#path-note { margin: 0 0 4px; font-size: 13px; }
+#path-note:empty { margin: 0; }
+#path-result { margin: 0 0 6px; padding: 0; list-style: none; }
+#path-result li { padding: 2px 0; }
+#path-result .hop { display: block; padding-left: 4px; font-size: 12px; color: var(--muted); }
+#path-result .hop .evidence { display: inline; padding: 0; }
+
+/* 넓은 화면(전체 화면·가운데 창): 선택한 페이지를 오른쪽 상세 패널로. 그래프 폭을 덜 빼앗고, 목록이 길어도 세로로 넉넉하다 */
+@media (min-width: 900px) {
+  .workspace { flex-direction: row; }
+  .drawer { flex: none; width: 340px; max-height: none; border-top: none; border-left: 1px solid var(--border); }
+  .sel-name { flex-basis: 100%; }
+  #sel-title { font-size: 16px; }
+  .links { grid-template-columns: 1fr; gap: 16px; }
 }

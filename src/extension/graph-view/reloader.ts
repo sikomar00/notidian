@@ -5,11 +5,12 @@ const RELOAD_EVERY_MS = 2000;
 // 비교 값에서 항목끼리 섞이지 않게 넣는 구분자(제목 등에 나올 수 없는 문자)
 const SEP = '\u0000';
 
-/** 그래프에 보이거나 쓰이는 것(제목·종류·상태·상위 페이지·소속 DB·주소·연결)을 하나의 비교 값으로. */
+/** 그래프에 보이거나 쓰이는 것(제목·종류·상태·상위 페이지·소속 DB·주소·연결과 그 근거)을 하나의 비교 값으로. */
 export function graphSignature(pages: readonly PageRecord[], links: readonly RawLink[]): string {
   return [
     ...pages.map((p) => [p.id, p.title, p.status, p.kind, p.parentPageId ?? '', p.databaseId ?? '', p.url].join(SEP)),
-    ...links.map((l) => `${l.from}${SEP}${l.to}`),
+    // 연결 근거가 바뀌어도(같은 연결의 문장만 고침) 패널을 다시 그린다
+    ...links.map((l) => `${l.from}${SEP}${l.to}${SEP}${l.evidence ? JSON.stringify(l.evidence) : ''}`),
   ].join('\n');
 }
 

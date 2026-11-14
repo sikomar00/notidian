@@ -1,4 +1,4 @@
-import type { PageRecord, RawLink, StoredText } from './types.ts';
+import type { LinkEvidence, PageRecord, RawLink, StoredText } from './types.ts';
 
 /**
  * 토큰 없이 둘러보는 예시 워크스페이스(P2-7). 실제 노션과 상관없는 가짜 데이터이고 저장하지 않는다.
@@ -58,6 +58,15 @@ const TEXTS: [id: string, text: string][] = [
   ['memo', '로드맵 2027을 다시 읽어 보기'],
 ];
 
+// 연결 근거(F-28·F-29) 예시: 종류별로 하나씩 드러나게 한다. 없는 연결은 근거를 모으기 전 지도처럼 보인다
+const EVIDENCE: Record<string, LinkEvidence> = {
+  'plan>api': { kinds: ['mention'], before: '자세한 요청·응답은 ', match: 'API 명세', after: '를 따른다' },
+  'meet-1>plan': { kinds: ['relation'], property: '관련 문서' },
+  'wiki>onboarding': { kinds: ['linkToPage'] },
+  'retro>meet-1': { kinds: ['mention', 'relation'], property: '회의', before: '이번 회고는 ', match: '11월 1주 회의', after: ' 결정을 돌아본다' },
+  'roadmap>metrics': { kinds: ['link'], before: '성과는 ', match: '지표 대시보드', after: '에서 본다' },
+};
+
 export function demoData(): DemoData {
   const page = ([id, title, database, parent]: (typeof PAGES)[number]): PageRecord => ({
     id: `demo-${id}`,
@@ -73,7 +82,10 @@ export function demoData(): DemoData {
   const locked: PageRecord = { id: 'demo-locked', title: '', kind: 'page', url: '', lastEdited: '', status: 'unreadable', unreadableReason: 'forbidden', failCount: 0 };
   return {
     pages: [...PAGES.map(page), locked],
-    links: LINKS.map(([from, to]) => ({ from: `demo-${from}`, to: `demo-${to}` })),
+    links: LINKS.map(([from, to]) => {
+      const evidence = EVIDENCE[`${from}>${to}`];
+      return { from: `demo-${from}`, to: `demo-${to}`, ...(evidence ? { evidence } : {}) };
+    }),
     databaseNames: { 'db-tasks': '할 일', 'db-meetings': '회의', 'db-refs': '자료' },
     texts: TEXTS.map(([id, text]) => ({ id: `demo-${id}`, text })),
   };
