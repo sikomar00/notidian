@@ -36,6 +36,8 @@
       .options summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
       .options-panel { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--bg); border: 1px solid var(--text); border-radius: 4px; white-space: nowrap; }
       .legend-db { gap: 12px; font-size: 13px; }
+      .export .hint { max-width: 20em; font-size: 12px; opacity: 0.8; white-space: normal; }
+      .export { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-top: 1px solid var(--text); }
       .demo { padding: 4px 8px; border: 2px dashed var(--text); border-radius: 4px; }
       .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; }
       .swatch.page { background: var(--page); border-radius: 50%; }
@@ -99,11 +101,18 @@
         <button id="legend-unreadable" type="button" aria-pressed="true"><span class="swatch unreadable" aria-hidden="true"></span>읽을 수 없는 페이지</button>
         </span>
         <details class="options">
-          <summary>보기 옵션</summary>
+          <summary>보기·내보내기</summary>
           <div class="options-panel">
             <label><input id="hierarchy" type="checkbox" /> 하위 페이지 선 보기</label>
             <label><input id="isolated" type="checkbox" /> 연결 없는 페이지 숨기기</label>
             <label><input id="db-colors" type="checkbox" /> DB별로 색 나누기</label>
+            <div class="export" role="group" aria-labelledby="export-title" aria-describedby="export-hint">
+              <span id="export-title">내보내기</span>
+              <span class="hint" id="export-hint">그림은 화면 그대로, 목록(CSV)은 범례·보기 옵션만 반영한 전체예요(주변만 보기·검색은 빼요)</span>
+              <button id="export-png" type="button">그래프 그림(PNG)</button>
+              <button id="export-pages" type="button">페이지 목록(CSV)</button>
+              <button id="export-links" type="button">연결 목록(CSV)</button>
+            </div>
           </div>
         </details>
         <span class="local" role="group" aria-label="주변만 보기">

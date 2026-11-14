@@ -22,6 +22,7 @@ import { openPage, switchMode } from './navigate.ts';
 import { applyPaletteVars, currentPalette } from './palette.ts';
 import { createGraphView } from './render.ts';
 import type { GraphView } from './render.ts';
+import { setupExport } from './exporter.ts';
 import { createReloader } from './reloader.ts';
 import { setupSearch } from './search.ts';
 import { createStatusLine } from './statusLine.ts';
@@ -394,6 +395,20 @@ function leaveDemo(): void {
 }
 
 byId('demo-exit').addEventListener('click', leaveDemo);
+setupExport(
+  {
+    graph: () => fullGraph,
+    rows: () => rows,
+    pages: () => pagesById,
+    databaseNames: () => databaseNames,
+    // 예시 페이지는 실제 노션 주소가 없다
+    urlOf: (id) => (demo ? '' : pageUrl(id, pagesById.get(id)?.url)),
+    showingList: () => listMode,
+    background: palette.background,
+    demo: () => demo,
+  },
+  notice,
+);
 byId('empty-demo').addEventListener('click', () => void openDemoTab());
 
 void init();
