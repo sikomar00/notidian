@@ -54,7 +54,7 @@ function savePng(source: ExportSource, notice: HTMLElement): void {
     return;
   }
   if (source.graph().nodes.length === 0) {
-    notice.textContent = '그릴 점이 없어요. 범례나 보기 옵션에서 숨긴 종류를 다시 보이게 해 주세요.';
+    notice.textContent = '그릴 점이 없어요. 범례나 "보기·내보내기"에서 숨긴 종류를 다시 보이게 해 주세요.';
     return;
   }
   const canvas = document.querySelector<HTMLCanvasElement>('#graph canvas');
