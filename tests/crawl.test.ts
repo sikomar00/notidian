@@ -8,6 +8,7 @@ import { withRetry } from '../src/notion/retry.ts';
 import { childOf, DB_ITEM, FakeNotion, hex, link, mention, paragraph, uid, WORKSPACE } from './helpers/fakeNotion.ts';
 import type { FakeBlock, FakePage } from './helpers/fakeNotion.ts';
 import { MemoryStore } from './helpers/memoryStore.ts';
+import { TEXT_VERSION } from '../src/notion/extractText.ts';
 
 const T0 = Date.parse('2026-11-13T08:00:00.000Z');
 const OLD = '2026-11-13T07:00:00.000Z';
@@ -390,7 +391,7 @@ test('본문 글자를 연결과 함께 저장하고, 요청 수는 기능 전�
   assert.equal(h.fake.calls.length, 14);
   assert.equal(h.store.texts.get(D), '회의록 참고', '@언급 글자와 코드 블록은 빼고');
   assert.equal(h.store.texts.has(E), false, '글자가 없는 페이지는 저장하지 않는다');
-  assert.equal((await h.store.getPage(D))?.textVersion, 1);
+  assert.equal((await h.store.getPage(D))?.textVersion, TEXT_VERSION);
   h.clock.t += 3_600_000;
   const pageA = h.fake.pages.get(A);
   assert.ok(pageA);
@@ -440,4 +441,36 @@ test('읽을 수 없게 되거나 지워진 페이지의 글자, 저장된 데�
   assert.equal(h.store.texts.has(E), false, '휴지통에 간 페이지');
   await h.store.clear();
   assert.deepEqual(await h.store.listTexts(), []);
+});
+
+test('연결마다 근거를 저장한다: @언급·링크는 앞뒤 글자, relation은 속성 이름, 25개 넘는 relation은 종류만(F-28·F-29)', async () => {
+  const fake = buildWorld();
+  const many = Array.from({ length: 30 }, (_, i) => uid(200 + i));
+  for (const id of many) fake.add({ id, title: `R${id.slice(-3)}`, parent: DB_ITEM, edited: OLD, blocks: [] });
+  const pageI3 = fake.pages.get(I3);
+  assert.ok(pageI3);
+  pageI3.relation = many;
+  const h = harness(fake);
+  await crawlAll(h);
+  const evidenceOf = async (from: string, to: string) => (await h.store.allLinks()).find((l) => l.from === from && l.to === to)?.evidence;
+  assert.deepEqual(await evidenceOf(A, B), { kinds: ['mention'], before: '', match: '제목', after: '링크제목' });
+  assert.deepEqual((await evidenceOf(A, C))?.kinds, ['link']);
+  assert.deepEqual(await evidenceOf(I1, T1), { kinds: ['relation'], property: '관련' });
+  assert.deepEqual(await evidenceOf(I3, many[0] as string), { kinds: ['relation'], property: '관련' }, '앞 25개는 속성 이름까지');
+  assert.deepEqual(await evidenceOf(I3, many[29] as string), { kinds: ['relation'] }, '따로 읽은 나머지는 종류만');
+});
+
+test('업데이트 전에 받아 둔 속성(근거 없음)으로 이어 읽어도 속성 근거를 잃지 않는다(F-30)', async () => {
+  const h = harness();
+  await beginCrawl(h.store, h.deps.now);
+  // 검색·정리 단계만 끝내고 멈춘다(읽을 페이지마다 속성을 받아 둔 상태)
+  for (let guard = 0; h.store.crawl?.phase === 'search' || h.store.crawl?.phase === 'cleanup'; guard += 1) {
+    assert.ok(guard < 50);
+    await runCrawl(h.deps, h.clock.t + 350);
+  }
+  // 옛 코드가 받아 둔 것처럼 근거를 지운다
+  for (const page of h.store.pages.values()) if (page.prefetched) delete page.prefetched.evidence;
+  assert.deepEqual(await runCrawl(h.deps, Infinity), { kind: 'done' });
+  const evidence = (await h.store.allLinks()).find((l) => l.from === I1 && l.to === T1)?.evidence;
+  assert.deepEqual(evidence, { kinds: ['relation'], property: '관련' });
 });

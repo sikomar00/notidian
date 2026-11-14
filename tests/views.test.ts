@@ -134,6 +134,9 @@ test('예시 데이터: 모든 연결이 있는 페이지를 가리키고, 그�
   const sample = demoData();
   const ids = new Set(sample.pages.map((p) => p.id));
   for (const link of sample.links) assert.ok(ids.has(link.from) && ids.has(link.to), `${link.from}→${link.to}`);
+  // 연결 근거 예시는 실제 있는 연결에 붙고, 종류 네 가지가 모두 드러난다(F-28)
+  const kinds = new Set(sample.links.flatMap((link) => link.evidence?.kinds ?? []));
+  assert.deepEqual([...kinds].sort(), ['link', 'linkToPage', 'mention', 'relation']);
   for (const page of sample.pages) if (page.parentPageId) assert.ok(ids.has(page.parentPageId), page.id);
   const graph = buildGraph(sample.pages, sample.links, { hierarchy: false });
   assert.ok(graph.nodes.some((n) => n.unreadable), '읽을 수 없는 페이지');

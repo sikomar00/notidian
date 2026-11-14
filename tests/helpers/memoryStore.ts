@@ -1,4 +1,4 @@
-import type { PageRecord, RawLink } from '../../src/graph/types.ts';
+import type { LinkEvidence, PageRecord, RawLink } from '../../src/graph/types.ts';
 import type { Counts, CrawlState, IndexStore, StoredText } from '../../src/extension/background/types.ts';
 
 /** 테스트용 메모리 저장소. IndexedDB처럼 값을 복사해서 주고받는다. */
@@ -7,6 +7,8 @@ export class MemoryStore implements IndexStore {
   links = new Map<string, string[]>();
   crawl: CrawlState | undefined;
   texts = new Map<string, string>();
+  /** `from\u0000to` → 연결 근거 */
+  evidence = new Map<string, LinkEvidence>();
 
   async getPage(id: string): Promise<PageRecord | undefined> {
     const page = this.pages.get(id);
@@ -36,13 +38,23 @@ export class MemoryStore implements IndexStore {
     return [...this.pages.values()].filter((page) => page.status === 'pending').map((page) => page.id);
   }
 
-  async replaceLinks(from: string, targets: readonly string[]): Promise<void> {
+  async replaceLinks(from: string, targets: readonly string[], evidence?: ReadonlyMap<string, LinkEvidence>): Promise<void> {
+    for (const key of [...this.evidence.keys()]) if (key.startsWith(`${from}\u0000`)) this.evidence.delete(key);
     if (targets.length === 0) this.links.delete(from);
     else this.links.set(from, [...new Set(targets)].sort());
+    for (const to of targets) {
+      const found = evidence?.get(to);
+      if (found) this.evidence.set(`${from}\u0000${to}`, structuredClone(found));
+    }
   }
 
   async allLinks(): Promise<RawLink[]> {
-    return [...this.links].flatMap(([from, targets]) => targets.map((to) => ({ from, to })));
+    return [...this.links].flatMap(([from, targets]) =>
+      targets.map((to) => {
+        const found = this.evidence.get(`${from}\u0000${to}`);
+        return { from, to, ...(found ? { evidence: structuredClone(found) } : {}) };
+      }),
+    );
   }
 
   async putText(id: string, text: string): Promise<void> {

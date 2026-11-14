@@ -9,7 +9,7 @@ test('상태마다 쉬운 말로 알려 준다(화면에서는 "연결 지도")'
   assert.equal(describeProgress({ phase: 'running', read: 12, discovered: 30 }), '연결 지도를 만드는 중이에요 · 12 / 30개 페이지 읽음');
   assert.equal(
     describeProgress({ phase: 'running', read: 12, discovered: 30, collectingText: true }),
-    '연결 지도를 만드는 중이에요 · 12 / 30개 페이지 읽음 · 본문을 처음 모으느라 이번엔 전체를 다시 읽어요',
+    '연결 지도를 만드는 중이에요 · 12 / 30개 페이지 읽음 · 본문과 연결 근거를 처음 모으느라 이번엔 전체를 다시 읽어요',
   );
   assert.equal(describeProgress({ phase: 'done', read: 30, discovered: 30 }), '연결 지도 완성 · 페이지 30개');
   assert.equal(describeProgress({ phase: 'paused', read: 5, discovered: 9 }), '멈췄어요 · 5 / 9개 페이지 읽음');
