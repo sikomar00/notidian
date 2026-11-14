@@ -209,3 +209,24 @@ export async function tokenSecurity(browser: Browser, check: Check): Promise<voi
   await expect(check, page, '토큰 지우기: 연결 지도는 남고 시작 버튼은 꺼지며 1단계로', `${STEPS} === 'active,todo,todo' && document.getElementById('index-start').disabled && chrome.storage.local.get('progress').then((p) => p.progress.phase === 'done')`, STEPS);
   await expect(check, graph, '토큰 지우기: 열려 있던 그래프 화면도 다시 만들기 버튼을 끔', `document.getElementById('reindex').disabled && !document.getElementById('reindex-hint').hidden`);
 }
+
+/** 내보내기(P2-8): 내려받기 링크 누르기를 가로채 만들어진 파일 내용을 확인한다(실제 파일은 만들지 않는다). */
+export async function exportFiles(browser: Browser, check: Check): Promise<void> {
+  const page = await openGraph(browser);
+  await page.run(`window.__downloads = []; HTMLAnchorElement.prototype.click = function () { window.__downloads.push({ name: this.download, href: this.href }); }`);
+  const last = `window.__downloads[window.__downloads.length - 1]`;
+  await page.run(`document.getElementById('export-pages').click()`);
+  // text()는 맨 앞 BOM을 떼어 내므로 바이트로 읽어 BOM(EF BB BF)을 직접 본다
+  const pages = (await page.run(`fetch(${last}.href).then((r) => r.arrayBuffer()).then((buffer) => { const bytes = new Uint8Array(buffer); const t = new TextDecoder().decode(bytes); return { name: ${last}.name, bom: bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf, head: t.split(String.fromCharCode(13, 10))[0], lines: t.trim().split(String.fromCharCode(13, 10)).length }; })`)) as { name: string; bom: boolean; head: string; lines: number };
+  check('내보내기: 페이지 목록 CSV(BOM·머리글·40행)', pages.bom && pages.head === '이름,종류,받은 연결,보낸 연결,소속 DB,주소,ID' && pages.lines === 41 && pages.name.startsWith('notidian-페이지-'), pages);
+  await page.run(`document.getElementById('export-links').click()`);
+  const links = (await page.run(`fetch(${last}.href).then((r) => r.text()).then((t) => t.split(String.fromCharCode(13, 10))[0])`)) as string;
+  check('내보내기: 연결 목록 CSV 머리글', links === '출발 페이지,도착 페이지,관계,출발 ID,도착 ID', links);
+  await page.run(`document.getElementById('export-png').click()`);
+  await waitFor(page, `window.__downloads.length === 3`);
+  const png = (await page.run(`fetch(${last}.href).then((r) => r.blob()).then((b) => ({ type: b.type, size: b.size, name: ${last}.name }))`)) as { type: string; size: number; name: string };
+  check('내보내기: 그래프 그림 PNG', png.type === 'image/png' && png.size > 5000 && png.name.endsWith('.png'), png);
+  await page.run(`document.getElementById('view-toggle').click()`);
+  await page.run(`document.getElementById('export-png').click()`);
+  await expect(check, page, '내보내기: 목록 보기에서 그림 저장은 안내만', `document.getElementById('notice').textContent.includes('그래프로 보기')`, `document.getElementById('notice').textContent`);
+}

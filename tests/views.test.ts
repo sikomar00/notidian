@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { computeSteps } from '../src/extension/options/steps.ts';
 import { unknownDatabases } from '../src/extension/background/databaseNames.ts';
 import { buildGraph } from '../src/graph/buildGraph.ts';
+import { linksCsv, pagesCsv, toCsv } from '../src/graph/exportCsv.ts';
 import { demoData } from '../src/graph/demoData.ts';
 import { applyFilters, hideIsolated, localSubgraph, SHOW_ALL } from '../src/graph/filter.ts';
 import type { PageRecord } from '../src/graph/types.ts';
@@ -138,4 +139,29 @@ test('예시 데이터: 모든 연결이 있는 페이지를 가리키고, 그�
   assert.ok(graph.nodes.some((n) => n.degree === 0), '연결 없는 페이지');
   assert.equal(new Set(graph.nodes.flatMap((n) => (n.group ? [n.group] : []))).size, 3, 'DB 세 개');
   for (const group of new Set(sample.pages.flatMap((p) => (p.databaseId ? [p.databaseId] : [])))) assert.ok(group in sample.databaseNames, group);
+});
+
+test('CSV 내보내기: 엑셀용 BOM·CRLF, 쉼표·따옴표 감싸기, 수식으로 시작하는 제목은 글자로(P2-8)', () => {
+  assert.equal(toCsv([['a', 1], ['b,c', 'say "hi"']]), '\uFEFFa,1\r\n"b,c","say ""hi"""\r\n');
+  // 엑셀이 수식으로 실행하지 않게 앞에 '를 붙인다. 탭으로 시작하거나 전각 기호(＝＋－＠)로 시작해도 막는다
+  assert.equal(toCsv([['=HYPERLINK("x")', '+1', '-2', '@a']]), '\uFEFF"\'=HYPERLINK(""x"")",\'+1,\'-2,\'@a\r\n');
+  assert.equal(toCsv([['\t=1', '＝SUM(A1)', '＋1', '－1', '＠a']]), "\uFEFF'\t=1,'＝SUM(A1),'＋1,'－1,'＠a\r\n");
+});
+
+test('CSV 내보내기: 페이지 목록과 연결 목록(양방향은 두 줄, 하위 페이지는 표시)(P2-8)', () => {
+  const rows = buildRows(data);
+  const pages = new Map([['b', record('b', 'db1')]]);
+  const csv = pagesCsv(rows, { pages, databaseNames: { db1: '할 일' }, urlOf: (id) => `https://app.notion.com/p/${id}` });
+  const lines = csv.slice(1).trim().split('\r\n');
+  assert.equal(lines[0], '이름,종류,받은 연결,보낸 연결,소속 DB,주소,ID');
+  assert.equal(lines[1], 'b,DB 항목,1,2,할 일,https://app.notion.com/p/b,b');
+  assert.ok(lines.includes('c,읽을 수 없음,1,0,,https://app.notion.com/p/c,c'), '읽을 수 없는 페이지도 주소(목록의 열기와 같게)');
+  const links = linksCsv(data).slice(1).trim().split('\r\n');
+  assert.deepEqual(links, [
+    '출발 페이지,도착 페이지,관계,출발 ID,도착 ID',
+    'a,b,가리킴,a,b',
+    'b,a,가리킴,b,a',
+    'b,c,가리킴,b,c',
+    'd,a,상위→하위,d,a',
+  ]);
 });
