@@ -11,7 +11,8 @@ export interface ExportSource {
   databaseNames(): Readonly<Record<string, string>>;
   urlOf(id: string): string;
   /** 목록 보기 중이면 그래프 그림이 없다 */
-  showingList(): boolean;
+  /** 목록·언급 정리를 보는 중이라 그래프가 가려져 있는지 */
+  graphHidden(): boolean;
   /** 그래프 바탕색(그림 파일은 투명하지 않게 이 색을 깐다) */
   background: string;
   /** 예시로 둘러보는 중이면 내 지도와 헷갈리지 않게 파일 이름에 "예시"를 붙인다 */
@@ -49,8 +50,8 @@ function withBackground(canvas: HTMLCanvasElement, color: string): HTMLCanvasEle
 }
 
 function savePng(source: ExportSource, notice: HTMLElement): void {
-  if (source.showingList()) {
-    notice.textContent = '그래프 그림은 "그래프로 보기"에서 저장할 수 있어요.';
+  if (source.graphHidden()) {
+    notice.textContent = '그래프 그림은 "그래프" 보기에서 저장할 수 있어요.';
     return;
   }
   if (source.graph().nodes.length === 0) {

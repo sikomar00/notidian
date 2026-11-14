@@ -1,3 +1,5 @@
+import '../ui.css';
+import './graph.css';
 import { buildGraph } from '../../graph/buildGraph.ts';
 import { applyFilters, hideIsolated, localSubgraph, SHOW_ALL } from '../../graph/filter.ts';
 import type { KindFilter } from '../../graph/filter.ts';
@@ -16,6 +18,7 @@ import { hasToken as tokenPresent, tokenChanged } from '../tokenStore.ts';
 import { renderDatabaseLegend } from './databaseLegend.ts';
 import { renderLinks } from './linksPanel.ts';
 import { createMentionsController } from './mentionsController.ts';
+import { setupRadioGroup } from './radioGroup.ts';
 import { followTabs } from './follow.ts';
 import { createListView } from './listview.ts';
 import { openDemoTab } from '../containers.ts';
@@ -35,6 +38,8 @@ const demo = params.get('demo') === '1';
 const mode: ViewMode = isViewMode(requested) ? requested : 'full';
 const palette = currentPalette();
 applyPaletteVars(palette);
+// shortcut: 화면을 연 채 시스템 테마가 바뀌면 다시 연다(선택·확대가 풀린다). 그래프 색을 그 자리에서 바꾸려면 render에 팔레트 교체를 넣는다
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => location.reload());
 
 const store = openIdbStore();
 const container = byId('graph');
@@ -43,7 +48,6 @@ const isolatedBox = byId<HTMLInputElement>('isolated');
 const dbColorsBox = byId<HTMLInputElement>('db-colors');
 const localBox = byId<HTMLInputElement>('local');
 const localDepth = byId<HTMLSelectElement>('local-depth');
-const viewToggle = byId<HTMLButtonElement>('view-toggle');
 const notice = byId('notice');
 const ZOOM_STEP = 1.5;
 const EMPTY_TEXT = '아직 그릴 연결이 없어요. 설정에서 토큰을 넣고 "연결 지도 만들기"를 눌러 주세요.';
@@ -258,18 +262,19 @@ for (const kind of ['page', 'dbItem', 'unreadable'] as const) {
 }
 
 // 목록은 그래프를 못 보거나 키보드로 쓰는 사람을 위한 같은 내용의 다른 보기다
+// [그래프|목록|언급 정리]: 셋 중 하나만 고르는 라디오 묶음
+const VIEWS = ['graph', 'list', 'cleanup'] as const;
+const markView = setupRadioGroup(['view-graph', 'view-list', 'view-cleanup'].map((id) => byId<HTMLButtonElement>(id)), (index) => showView(VIEWS[index] ?? 'graph'));
 function showView(next: typeof shown): void {
+  if (next === shown) return;
   shown = next;
+  markView(VIEWS.indexOf(next));
   byId('graph-area').hidden = next !== 'graph';
   byId('list-view').hidden = next !== 'list';
   byId('cleanup-view').hidden = next !== 'cleanup';
-  viewToggle.textContent = next === 'list' ? '그래프로 보기' : '목록으로 보기';
-  byId('cleanup-toggle').setAttribute('aria-pressed', String(next === 'cleanup'));
   if (next === 'list') list.setRows(rows);
   mentions.setCleanupShown(next === 'cleanup');
 }
-viewToggle.addEventListener('click', () => showView(shown === 'list' ? 'graph' : 'list'));
-byId('cleanup-toggle').addEventListener('click', () => showView(shown === 'cleanup' ? 'graph' : 'cleanup'));
 byId<HTMLInputElement>('search').addEventListener('input', (event) => {
   list.setQuery((event.target as HTMLInputElement).value);
 });
@@ -431,7 +436,8 @@ setupExport(
     databaseNames: () => databaseNames,
     // 예시 페이지는 실제 노션 주소가 없다
     urlOf: (id) => (demo ? '' : pageUrl(id, pagesById.get(id)?.url)),
-    showingList: () => shown === 'list',
+    // 목록·언급 정리를 보는 동안은 그래프가 가려져 그림을 저장하지 않는다
+    graphHidden: () => shown !== 'graph',
     background: palette.background,
     demo: () => demo,
   },
