@@ -1,23 +1,19 @@
 import '../ui.css';
 import './graph.css';
-import { buildGraph } from '../../graph/buildGraph.ts';
-import { applyFilters, hideIsolated, localSubgraph, SHOW_ALL } from '../../graph/filter.ts';
+import { localSubgraph, SHOW_ALL } from '../../graph/filter.ts';
 import type { KindFilter } from '../../graph/filter.ts';
 import { demoData } from '../../graph/demoData.ts';
-import { buildRows, linkedPages } from '../../graph/rows.ts';
+import { linkedPages } from '../../graph/rows.ts';
+import { visibleGraph } from '../../graph/visibleGraph.ts';
 import type { NodeRow } from '../../graph/rows.ts';
 import type { GraphData, LinkEvidence, PageRecord, RawLink } from '../../graph/types.ts';
 import { pageUrl } from '../../notion/urlToPageId.ts';
 import { openIdbStore } from '../background/idbStore.ts';
-import { IDLE_PROGRESS } from '../background/types.ts';
-import type { Progress } from '../background/types.ts';
 import { byId } from '../dom.ts';
 import { isViewMode } from '../messages.ts';
 import type { Message, ViewMode } from '../messages.ts';
-import { hasToken as tokenPresent, tokenChanged } from '../tokenStore.ts';
 import { renderLinks } from './linksPanel.ts';
 import { createMentionsController } from './mentionsController.ts';
-import { setupRadioGroup } from './radioGroup.ts';
 import { createPathPanel } from './pathPanel.ts';
 import { createLinkTooltip } from './linkTooltip.ts';
 import { createColorsController } from './colorsController.ts';
@@ -26,7 +22,10 @@ import { timeAgo } from '../progressText.ts';
 import { followTabs } from './follow.ts';
 import { createListView } from './listview.ts';
 import { openDemoTab } from '../containers.ts';
-import { openPage, switchMode } from './navigate.ts';
+import { openPage } from './navigate.ts';
+import { setupToolbar } from './toolbar.ts';
+import { loadSaved, watchStorage } from './startup.ts';
+import type { Shown } from './toolbar.ts';
 import { applyPaletteVars, currentPalette } from './palette.ts';
 import { createGraphView } from './render.ts';
 import type { GraphView } from './render.ts';
@@ -52,7 +51,6 @@ const isolatedBox = byId<HTMLInputElement>('isolated');
 const localBox = byId<HTMLInputElement>('local');
 const localDepth = byId<HTMLSelectElement>('local-depth');
 const notice = byId('notice');
-const ZOOM_STEP = 1.5;
 const EMPTY_TEXT = '아직 그릴 연결이 없어요. 설정에서 토큰을 넣고 "연결 지도 만들기"를 눌러 주세요.';
 const FILTERED_TEXT = '모든 종류를 숨겼어요. 위의 점 종류 버튼을 눌러 다시 보이게 하세요.';
 
@@ -75,8 +73,7 @@ let pickCurrent = false;
 let selectedId: string | null = null;
 // 사용자가 직접 확대·이동하기 전까지는 점이 늘거나 배치가 멈출 때마다 전체가 보이게 맞춘다
 let autoFit = true;
-// 그래프 자리에 보이는 것: 그래프, 목록 보기, 언급 정리(S2-8) 중 하나
-let shown: 'graph' | 'list' | 'cleanup' = 'graph';
+let shown: Shown = 'graph';
 
 function openById(id: string): void {
   if (demo) {
@@ -112,7 +109,9 @@ const localCenter = (): string | null => (localBox.checked && selectedId !== nul
 // 연결 근거(F-28): `from\u0000to` → 근거. 저장된 지도를 다시 읽을 때 새로 만든다
 let evidenceByKey = new Map<string, LinkEvidence | undefined>();
 const evidenceOf = (from: string, to: string): LinkEvidence | undefined => evidenceByKey.get(`${from}\u0000${to}`);
-function setLinks(links: RawLink[]): void {
+function setData(pages: PageRecord[], links: RawLink[]): void {
+  rawPages = pages;
+  pagesById = new Map(pages.map((page) => [page.id, page]));
   rawLinks = links;
   evidenceByKey = new Map(links.map((link) => [`${link.from}\u0000${link.to}`, link.evidence]));
 }
@@ -252,12 +251,13 @@ function renderEmpty(): void {
 
 // 저장소를 다시 읽지 않고, 하위 페이지 스위치·범례 필터만 바꿔 다시 그린다
 function rebuild(): void {
-  const filtered = applyFilters(buildGraph(rawPages, rawLinks, { hierarchy: hierarchyBox.checked }), hidden);
-  kindVisible = new Set(filtered.nodes.flatMap((node) => (node.unreadable ? [] : [node.id])));
-  // 지금 페이지와 선택한 페이지는 외톨이여도 남긴다(숨기면 찾을 수도, 따라갈 수도 없다)
-  fullGraph = isolatedBox.checked ? hideIsolated(filtered, [focusId, selectedId]) : filtered;
+  ({ graph: fullGraph, kindVisible, rows } = visibleGraph(rawPages, rawLinks, {
+    hierarchy: hierarchyBox.checked,
+    hidden,
+    hideIsolated: isolatedBox.checked,
+    keep: [focusId, selectedId],
+  }));
   colors.rebuilt();
-  rows = buildRows(fullGraph);
   rowsById = new Map(rows.map((row) => [row.id, row]));
   // 숨겨진 목록은 다시 그리지 않고, 보일 때 그린다
   if (shown === 'list') list.setRows(rows);
@@ -280,13 +280,37 @@ function rebuild(): void {
   if (target) applyData(target);
 }
 
+// [그래프|목록|언급 정리] 전환
+function showView(next: Shown): void {
+  if (next === shown) return;
+  shown = next;
+  markView(next);
+  byId('graph-area').hidden = next !== 'graph';
+  if (next !== 'graph') linkTooltip.hide();
+  byId('list-view').hidden = next !== 'list';
+  byId('cleanup-view').hidden = next !== 'cleanup';
+  if (next === 'list') list.setRows(rows);
+  mentions.setCleanupShown(next === 'cleanup');
+}
+const markView = setupToolbar({
+  mode,
+  notice,
+  container,
+  view: () => view,
+  setAutoFit: (on) => (autoFit = on),
+  toggleKind: (kind) => {
+    hidden = { ...hidden, [kind]: !hidden[kind] };
+    return !hidden[kind];
+  },
+  rebuild,
+  showView,
+});
+
 const status = createStatusLine();
 const reloader = createReloader({
   read: () => Promise.all([store.listPages(), store.allLinks()]),
   onData: (pages, links) => {
-    rawPages = pages;
-    setLinks(links);
-    pagesById = new Map(pages.map((page) => [page.id, page]));
+    setData(pages, links);
     // 제목이 바뀌었을 수 있어 본문 글자도 다시 준비한다
     mentions.dataReloaded();
     rebuild();
@@ -296,61 +320,10 @@ const reloader = createReloader({
   },
 });
 
-for (const target of ['side', 'center', 'full'] as const) {
-  const button = byId<HTMLButtonElement>(`mode-${target}`);
-  button.setAttribute('aria-pressed', String(target === mode));
-  button.addEventListener('click', () => {
-    void switchMode(target, mode).then((failure) => {
-      notice.textContent = failure ?? '';
-    });
-  });
-}
-
-for (const kind of ['page', 'dbItem', 'unreadable'] as const) {
-  const button = byId<HTMLButtonElement>(kind === 'dbItem' ? 'legend-db' : `legend-${kind}`);
-  button.addEventListener('click', () => {
-    hidden = { ...hidden, [kind]: !hidden[kind] };
-    button.setAttribute('aria-pressed', String(!hidden[kind]));
-    rebuild();
-  });
-}
-
-// 목록은 그래프를 못 보거나 키보드로 쓰는 사람을 위한 같은 내용의 다른 보기다
-// [그래프|목록|언급 정리]: 셋 중 하나만 고르는 라디오 묶음
-const VIEWS = ['graph', 'list', 'cleanup'] as const;
-const markView = setupRadioGroup(['view-graph', 'view-list', 'view-cleanup'].map((id) => byId<HTMLButtonElement>(id)), (index) => showView(VIEWS[index] ?? 'graph'));
-function showView(next: typeof shown): void {
-  if (next === shown) return;
-  shown = next;
-  markView(VIEWS.indexOf(next));
-  byId('graph-area').hidden = next !== 'graph';
-  if (next !== 'graph') linkTooltip.hide();
-  byId('list-view').hidden = next !== 'list';
-  byId('cleanup-view').hidden = next !== 'cleanup';
-  if (next === 'list') list.setRows(rows);
-  mentions.setCleanupShown(next === 'cleanup');
-}
 byId<HTMLInputElement>('search').addEventListener('input', (event) => {
   list.setQuery((event.target as HTMLInputElement).value);
 });
 
-byId('zoom-in').addEventListener('click', () => {
-  autoFit = false;
-  view?.zoomBy(ZOOM_STEP);
-});
-byId('zoom-out').addEventListener('click', () => {
-  autoFit = false;
-  view?.zoomBy(1 / ZOOM_STEP);
-});
-byId('zoom-fit').addEventListener('click', () => {
-  autoFit = true;
-  view?.fit();
-});
-for (const type of ['wheel', 'mousedown'] as const) {
-  container.addEventListener(type, () => (autoFit = false), { passive: true });
-}
-
-for (const id of ['open-settings', 'empty-settings']) byId(id).addEventListener('click', () => void chrome.runtime.openOptionsPage());
 byId('sel-open').addEventListener('click', () => {
   if (selectedId !== null) openById(selectedId);
 });
@@ -377,19 +350,7 @@ new ResizeObserver(() => {
   else if (autoFit) target.fit();
 }).observe(container);
 
-if (!demo) chrome.storage.onChanged.addListener((changes, area) => {
-  const progress = changes.progress?.newValue as Progress | undefined;
-  if (area === 'local' && progress) {
-    status.setProgress(progress);
-    reloader.schedule(progress.phase === 'running');
-    mentions.progress(progress.phase);
-  }
-  if (tokenChanged(changes, area)) {
-    void tokenPresent().then(status.setHasToken);
-  }
-  const pageId: unknown = changes.focusPageId?.newValue;
-  if (area === 'session' && changes.focusPageId) setCurrentPage(typeof pageId === 'string' ? pageId : null);
-});
+if (!demo) watchStorage({ status, reloader, mentions }, (id) => setCurrentPage(id));
 
 // 지금 페이지가 바뀌면(아이콘 클릭·옆 패널 따라가기) 그래프를 다시 짜지 않고 강조와 선택만 바꾼다
 function setCurrentPage(id: string | null): void {
@@ -429,27 +390,14 @@ async function init(): Promise<void> {
     showDemo();
     return;
   }
-  const [local, session, present] = await Promise.all([
-    chrome.storage.local.get(['progress', 'databaseNames', 'databaseNamesError']),
-    chrome.storage.session.get('focusPageId'),
-    tokenPresent(),
-  ]);
-  status.setHasToken(present);
-  await Promise.all([mentions.init(), colors.init()]);
-  colors.setDatabaseNames((local.databaseNames as Record<string, string> | undefined) ?? {}, local.databaseNamesError as string | undefined);
-  const progress = (local.progress as Progress | undefined) ?? IDLE_PROGRESS;
-  status.setProgress(progress);
-  mentions.progress(progress.phase);
-  focusId = typeof session.focusPageId === 'string' ? session.focusPageId : null;
+  focusId = await loadSaved({ status, mentions, colors });
   pickCurrent = focusId !== null;
   await reloader.reload();
 }
 
 function showDemo(): void {
   const sample = demoData();
-  rawPages = sample.pages;
-  setLinks(sample.links);
-  pagesById = new Map(sample.pages.map((page) => [page.id, page]));
+  setData(sample.pages, sample.links);
   colors.setDatabaseNames(sample.databaseNames, undefined);
   byId('demo-banner').hidden = false;
   // 예시를 보는 동안 내 연결 지도의 상태·버튼은 헷갈리므로 숨긴다(다시 볼 페이지는 예시에서도 쓴다)
