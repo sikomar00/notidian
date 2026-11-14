@@ -1,4 +1,4 @@
-import { buildGraph, UNTITLED } from '../../graph/buildGraph.ts';
+import { buildGraph } from '../../graph/buildGraph.ts';
 import { applyFilters, hideIsolated, localSubgraph, SHOW_ALL } from '../../graph/filter.ts';
 import type { KindFilter } from '../../graph/filter.ts';
 import { demoData } from '../../graph/demoData.ts';
@@ -15,7 +15,7 @@ import type { Message, ViewMode } from '../messages.ts';
 import { hasToken as tokenPresent, tokenChanged } from '../tokenStore.ts';
 import { renderDatabaseLegend } from './databaseLegend.ts';
 import { renderLinks } from './linksPanel.ts';
-import { createMentionsPanel } from './mentionsPanel.ts';
+import { createMentionsController } from './mentionsController.ts';
 import { followTabs } from './follow.ts';
 import { createListView } from './listview.ts';
 import { openDemoTab } from '../containers.ts';
@@ -55,6 +55,8 @@ let rawLinks: RawLink[] = [];
 let hidden: KindFilter = SHOW_ALL;
 // fullGraph = 필터만 적용한 전체(검색·목록·받은·보낸 연결의 기준), lastGraph = 실제로 그리는 것(주변만 보기면 일부)
 let fullGraph: GraphData = { nodes: [], links: [] };
+// 범례만 적용한 읽을 수 있는 페이지(언급 정리 대상). 외톨이 숨기기는 빼지 않는다
+let kindVisible: ReadonlySet<string> = new Set();
 let lastGraph: GraphData = fullGraph;
 let rows: NodeRow[] = [];
 let rowsById = new Map<string, NodeRow>();
@@ -66,7 +68,8 @@ let pickCurrent = false;
 let selectedId: string | null = null;
 // 사용자가 직접 확대·이동하기 전까지는 점이 늘거나 배치가 멈출 때마다 전체가 보이게 맞춘다
 let autoFit = true;
-let listMode = false;
+// 그래프 자리에 보이는 것: 그래프, 목록 보기, 언급 정리(S2-8) 중 하나
+let shown: 'graph' | 'list' | 'cleanup' = 'graph';
 
 function openById(id: string): void {
   if (demo) {
@@ -98,34 +101,22 @@ function select(id: string | null): void {
 
 const localCenter = (): string | null => (localBox.checked && selectedId !== null && rowsById.has(selectedId) ? selectedId : null);
 
-// 연결 안 된 언급(S2-7): 예시 모드는 가짜 본문, 아니면 저장된 본문 글자
-const mentions = createMentionsPanel(demo ? async () => demoData().texts : () => store.listTexts(), openById);
-let indexing = false;
-// 만드는 동안에도 새로 모은 글자가 칸에 나오게 이 간격마다 다시 불러온다(F-21)
-const TEXT_REFRESH_MS = 5000;
-let textsLoadedAt = 0;
-
-function refreshMentions(): void {
-  mentions.invalidate();
-  textsLoadedAt = Date.now();
-  renderSelection();
-}
+// 연결 안 된 언급(S2-7)·언급 정리(S2-8): 예시 모드는 가짜 본문, 아니면 저장된 본문 글자
+const mentions = createMentionsController({
+  demo,
+  loadTexts: demo ? async () => demoData().texts : () => store.listTexts(),
+  onOpen: openById,
+  notice,
+  data: () => ({ pagesById, links: rawLinks, visible: kindVisible }),
+  redrawSelection: () => renderSelection(),
+});
 
 function renderSelection(): void {
   const row = selectedId === null ? undefined : rowsById.get(selectedId);
   byId('selection').hidden = row === undefined;
   byId('sel-title').textContent = row?.title ?? '';
   renderLinks(row ? linkedPages(fullGraph, row.id) : undefined, select);
-  const target = row && !row.unreadable ? { id: row.id, title: pagesById.get(row.id)?.title ?? row.title } : undefined;
-  void mentions.render({
-    target,
-    linkedFrom: new Set(target ? rawLinks.filter((link) => link.to === target.id).map((link) => link.from) : []),
-    running: indexing,
-    titleOf: (id) => {
-      const page = pagesById.get(id);
-      return page ? page.title || UNTITLED : undefined;
-    },
-  });
+  mentions.drawer(row && !row.unreadable ? { id: row.id, title: pagesById.get(row.id)?.title ?? row.title } : undefined);
 }
 
 const searchInput = byId<HTMLInputElement>('search');
@@ -208,13 +199,15 @@ function renderEmpty(): void {
 // 저장소를 다시 읽지 않고, 하위 페이지 스위치·범례 필터만 바꿔 다시 그린다
 function rebuild(): void {
   const filtered = applyFilters(buildGraph(rawPages, rawLinks, { hierarchy: hierarchyBox.checked }), hidden);
+  kindVisible = new Set(filtered.nodes.flatMap((node) => (node.unreadable ? [] : [node.id])));
   // 지금 페이지와 선택한 페이지는 외톨이여도 남긴다(숨기면 찾을 수도, 따라갈 수도 없다)
   fullGraph = isolatedBox.checked ? hideIsolated(filtered, [focusId, selectedId]) : filtered;
   applyDatabaseColors();
   rows = buildRows(fullGraph);
   rowsById = new Map(rows.map((row) => [row.id, row]));
   // 숨겨진 목록은 다시 그리지 않고, 보일 때 그린다
-  if (listMode) list.setRows(rows);
+  if (shown === 'list') list.setRows(rows);
+  mentions.rebuilt();
   search.setItems(fullGraph.nodes.filter((node) => !node.unreadable));
   if (pickCurrent && focusId !== null && rowsById.has(focusId)) {
     pickCurrent = false;
@@ -237,7 +230,7 @@ const reloader = createReloader({
     rawLinks = links;
     pagesById = new Map(pages.map((page) => [page.id, page]));
     // 제목이 바뀌었을 수 있어 본문 글자도 다시 준비한다
-    mentions.invalidate();
+    mentions.dataReloaded();
     rebuild();
   },
   onError: (error) => {
@@ -265,13 +258,18 @@ for (const kind of ['page', 'dbItem', 'unreadable'] as const) {
 }
 
 // 목록은 그래프를 못 보거나 키보드로 쓰는 사람을 위한 같은 내용의 다른 보기다
-viewToggle.addEventListener('click', () => {
-  listMode = !listMode;
-  byId('graph-area').hidden = listMode;
-  byId('list-view').hidden = !listMode;
-  viewToggle.textContent = listMode ? '그래프로 보기' : '목록으로 보기';
-  if (listMode) list.setRows(rows);
-});
+function showView(next: typeof shown): void {
+  shown = next;
+  byId('graph-area').hidden = next !== 'graph';
+  byId('list-view').hidden = next !== 'list';
+  byId('cleanup-view').hidden = next !== 'cleanup';
+  viewToggle.textContent = next === 'list' ? '그래프로 보기' : '목록으로 보기';
+  byId('cleanup-toggle').setAttribute('aria-pressed', String(next === 'cleanup'));
+  if (next === 'list') list.setRows(rows);
+  mentions.setCleanupShown(next === 'cleanup');
+}
+viewToggle.addEventListener('click', () => showView(shown === 'list' ? 'graph' : 'list'));
+byId('cleanup-toggle').addEventListener('click', () => showView(shown === 'cleanup' ? 'graph' : 'cleanup'));
 byId<HTMLInputElement>('search').addEventListener('input', (event) => {
   list.setQuery((event.target as HTMLInputElement).value);
 });
@@ -342,10 +340,7 @@ if (!demo) chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && progress) {
     status.setProgress(progress);
     reloader.schedule(progress.phase === 'running');
-    // 다 만들면 바로, 만드는 중에는 가끔 새로 모은 본문 글자로 칸을 다시 계산한다(F-21)
-    const finished = indexing && progress.phase !== 'running';
-    indexing = progress.phase === 'running';
-    if (finished || (indexing && selectedId !== null && Date.now() - textsLoadedAt > TEXT_REFRESH_MS)) refreshMentions();
+    mentions.progress(progress.phase);
   }
   if (tokenChanged(changes, area)) {
     void tokenPresent().then(status.setHasToken);
@@ -398,11 +393,12 @@ async function init(): Promise<void> {
     tokenPresent(),
   ]);
   status.setHasToken(present);
+  await mentions.init();
   databaseNames = (local.databaseNames as Record<string, string> | undefined) ?? {};
   databaseNamesError = local.databaseNamesError as string | undefined;
   const progress = (local.progress as Progress | undefined) ?? IDLE_PROGRESS;
   status.setProgress(progress);
-  indexing = progress.phase === 'running';
+  mentions.progress(progress.phase);
   focusId = typeof session.focusPageId === 'string' ? session.focusPageId : null;
   pickCurrent = focusId !== null;
   await reloader.reload();
@@ -435,7 +431,7 @@ setupExport(
     databaseNames: () => databaseNames,
     // 예시 페이지는 실제 노션 주소가 없다
     urlOf: (id) => (demo ? '' : pageUrl(id, pagesById.get(id)?.url)),
-    showingList: () => listMode,
+    showingList: () => shown === 'list',
     background: palette.background,
     demo: () => demo,
   },

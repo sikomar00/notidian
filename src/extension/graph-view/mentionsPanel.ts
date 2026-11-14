@@ -1,7 +1,8 @@
-import { findUnlinkedMentions, prepareTexts } from '../../graph/unlinkedMentions.ts';
+import { findUnlinkedMentions, normalizeTitle } from '../../graph/unlinkedMentions.ts';
 import type { Mention, PreparedText } from '../../graph/unlinkedMentions.ts';
-import type { StoredText } from '../../graph/types.ts';
 import { byId } from '../dom.ts';
+import { mentionName, mentionSnippet } from './mentionSnippet.ts';
+import type { TextCache } from './textCache.ts';
 
 // 받은·보낸 연결 목록과 같은 한도. 흔한 제목은 결과가 많을 수 있다
 const MAX_ITEMS = 50;
@@ -15,6 +16,8 @@ export interface MentionsRequest {
   running: boolean;
   /** 결과 줄에 쓸 페이지 제목(제목 없는 페이지는 "(제목 없음)"). 지도에 없는 페이지(지워진 페이지의 남은 글자 등)는 undefined */
   titleOf: (id: string) => string | undefined;
+  /** 언급 정리에서 뺀 제목(비교용 글자) */
+  ignored: ReadonlySet<string>;
 }
 
 function note(text: string): HTMLLIElement {
@@ -30,30 +33,18 @@ function mentionItem(mention: Mention, onOpen: (id: string) => void): HTMLLIElem
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'mention';
-  const name = document.createElement('span');
-  name.className = 'name';
-  name.textContent = mention.title;
-  const snippet = document.createElement('span');
-  snippet.className = 'snippet';
-  const match = document.createElement('strong');
-  match.textContent = mention.match;
-  snippet.append(`“${mention.before}`, match, `${mention.after}”`);
-  button.append(name, ` · ${mention.count}곳`, snippet);
+  button.append(mentionName(mention.title), ` · ${mention.count}곳`, mentionSnippet(mention));
   button.addEventListener('click', () => onOpen(mention.id));
   li.append(button);
   return li;
 }
 
-/**
- * 선택한 페이지의 연결 안 된 언급 칸(S2-7). 본문 글자는 처음 그릴 때 한 번 불러 두고,
- * `invalidate()` 뒤 다음 그릴 때 다시 불러온다(저장된 지도를 다시 읽었을 때·다 만들었을 때).
- */
-export function createMentionsPanel(loadTexts: () => Promise<StoredText[]>, onOpen: (id: string) => void) {
+/** 선택한 페이지의 연결 안 된 언급 칸(S2-7). 본문 글자는 언급 정리와 함께 쓰는 `cache`에서 가져온다. */
+export function createMentionsPanel(cache: TextCache, onOpen: (id: string) => void) {
   const section = byId('mentions');
   const heading = byId('mention-title');
   const status = byId('mentions-note');
   const list = byId('sel-mentions');
-  let texts: Promise<PreparedText[]> | undefined;
   let ticket = 0;
 
   function show(results: Mention[], running: boolean): void {
@@ -73,17 +64,14 @@ export function createMentionsPanel(loadTexts: () => Promise<StoredText[]>, onOp
     list.replaceChildren();
   }
 
-  async function render({ target, linkedFrom, running, titleOf }: MentionsRequest): Promise<void> {
+  async function render({ target, linkedFrom, running, titleOf, ignored }: MentionsRequest): Promise<void> {
     const mine = ++ticket;
     section.hidden = target === undefined;
     if (!target) return;
     let stored: PreparedText[];
     try {
-      // 글자 정리(NFC·소문자)는 불러올 때 한 번만 한다. 다시 그릴 때마다 전체 글자를 다시 훑지 않게
-      texts ??= loadTexts().then((loaded) => prepareTexts(loaded, titleOf));
-      stored = await texts;
+      stored = await cache.get(titleOf);
     } catch (error) {
-      texts = undefined;
       if (mine === ticket) showNote(`본문 글자를 읽지 못했어요: ${error instanceof Error ? error.message : String(error)}`);
       return;
     }
@@ -93,15 +81,15 @@ export function createMentionsPanel(loadTexts: () => Promise<StoredText[]>, onOp
       showNote('다시 만들기를 하면 보여요');
       return;
     }
+    const title = normalizeTitle(target.title);
+    if (title !== null && ignored.has(title)) {
+      showNote('언급 정리에서 뺀 제목이라 찾지 않아요');
+      return;
+    }
     const results = findUnlinkedMentions(target, stored, linkedFrom);
     if (results === 'too-short') showNote('제목이 너무 짧아서 찾지 않아요');
     else show(results, running);
   }
 
-  return {
-    render,
-    invalidate(): void {
-      texts = undefined;
-    },
-  };
+  return { render };
 }
