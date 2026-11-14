@@ -68,7 +68,7 @@ export function setupHover<L>(container: Pick<HTMLElement, 'addEventListener' | 
     deps.onLink(null, { x: 0, y: 0 });
   });
   // 화면이 움직이는 동안 프레임마다 다시 판정하면 선 수천 개를 매번 훑으므로 이 간격으로만 한다
-  let lastRecheck = 0;
+  let lastRecheck = Number.NEGATIVE_INFINITY;
   return {
     recheck() {
       const now = performance.now();
