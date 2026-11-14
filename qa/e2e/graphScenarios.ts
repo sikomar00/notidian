@@ -46,7 +46,7 @@ export async function optionsAndSeed(browser: Browser, check: Check): Promise<vo
   await expect(check, empty, '예시: 버튼을 눌러도 이 탭은 그대로, 예시 탭을 따로 엶', `!location.search.includes('demo') && chrome.storage.session.get('demoTabId').then((s) => typeof s.demoTabId === 'number')`);
   const demo = await browser.open(browser.ext('graph.html?mode=full&demo=1'));
   await expect(check, demo, '예시: 띠가 보이고 그래프가 그려지며 내 지도 상태 줄은 숨김', `!document.getElementById('demo-banner').hidden && document.getElementById('status-row').hidden && !!document.querySelector('#graph canvas') && document.getElementById('empty').hidden`);
-  await demo.run(`document.getElementById('view-toggle').click()`);
+  await demo.run(`document.getElementById('view-list').click()`);
   await expect(check, demo, '예시: 목록에 예시 페이지 23개', `document.getElementById('list-body').rows.length === 23`, `document.getElementById('list-body').rows.length`);
   await demo.run(`document.querySelector('#list-body tr button').click()`);
   await expect(check, demo, '예시: Notion에서 열기는 안내만', `document.getElementById('notice').textContent.includes('예시 페이지라')`, `document.getElementById('notice').textContent`);
@@ -109,7 +109,7 @@ export async function graphBasics(browser: Browser, check: Check): Promise<void>
 }
 
 async function listView(page: Page, check: Check): Promise<void> {
-  await page.run(`document.getElementById('view-toggle').click()`);
+  await page.run(`document.getElementById('view-list').click()`);
   await page.run(`(() => { const s = document.getElementById('search'); s.value = ''; s.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const first = q(`$('list-body').rows.length + ' | ' + [...$('list-body').rows[0].cells].slice(0, 4).map((c) => c.textContent).join('|')`);
   await expect(check, page, '목록 보기: 40행, 연결 많은 순', `${first} === '40 | 경쟁사 분석|페이지|5|2'`, first);
@@ -120,7 +120,7 @@ async function listView(page: Page, check: Check): Promise<void> {
   check('목록 보기: 색인 갱신으로 다시 그려도 초점 유지', (await page.run(`document.activeElement.getAttribute('aria-label')`)) === before);
   await page.send('Emulation.setDeviceMetricsOverride', { width: 360, height: 800, deviceScaleFactor: 1, mobile: false });
   await expect(check, page, '목록 보기: 360px 가로 넘침 없음', NO_HSCROLL);
-  await page.run(`document.getElementById('view-toggle').click()`);
+  await page.run(`document.getElementById('view-graph').click()`);
   await expect(check, page, '목록→그래프: 캔버스가 다시 화면 크기', `document.querySelector('#graph canvas').width === 360`, `document.querySelector('#graph canvas').width`);
 }
 
@@ -136,7 +136,7 @@ export async function currentPage(browser: Browser, check: Check): Promise<void>
   await expect(check, page, '지금 페이지: 필터를 껐다 켜도 사용자 선택 유지', panelStarts('항목 11'), PANEL);
   await page.run(`document.getElementById('sel-clear').click()`);
   await expect(check, page, '선택 해제: 서랍 숨김·목록 비움', q(`$('selection').hidden && $('sel-in').children.length === 0`));
-  await page.run(`document.getElementById('view-toggle').click()`);
+  await page.run(`document.getElementById('view-list').click()`);
   await page.run(`chrome.storage.session.set({ focusPageId: 'p5' })`);
   await expect(check, page, '지금 페이지: 목록 보기에서도 선택', panelStarts('데이터 모델'), PANEL);
 }
@@ -184,7 +184,7 @@ export async function filtersAndGroups(browser: Browser, check: Check): Promise<
   await sleep(800);
   const after = Number(await page.run(pixelsOf('#0e7c56')));
   check('DB별 색: 끄면 초록이 사라지고 범례도 숨김', after === 0 && (await page.run(`document.getElementById('db-legend').hidden`)) === true, after);
-  await page.run(`document.getElementById('view-toggle').click()`);
+  await page.run(`document.getElementById('view-list').click()`);
   const zeroRows = q(`[...$('list-body').rows].filter((r) => r.cells[2].textContent === '0' && r.cells[3].textContent === '0').length`);
   const before = Number(await page.run(zeroRows));
   await page.run(`document.getElementById('isolated').click()`);
@@ -226,7 +226,7 @@ export async function exportFiles(browser: Browser, check: Check): Promise<void>
   await waitFor(page, `window.__downloads.length === 3`);
   const png = (await page.run(`fetch(${last}.href).then((r) => r.blob()).then((b) => ({ type: b.type, size: b.size, name: ${last}.name }))`)) as { type: string; size: number; name: string };
   check('내보내기: 그래프 그림 PNG', png.type === 'image/png' && png.size > 5000 && png.name.endsWith('.png'), png);
-  await page.run(`document.getElementById('view-toggle').click()`);
+  await page.run(`document.getElementById('view-list').click()`);
   await page.run(`document.getElementById('export-png').click()`);
-  await expect(check, page, '내보내기: 목록 보기에서 그림 저장은 안내만', `document.getElementById('notice').textContent.includes('그래프로 보기')`, `document.getElementById('notice').textContent`);
+  await expect(check, page, '내보내기: 목록 보기에서 그림 저장은 안내만', `document.getElementById('notice').textContent.includes('"그래프" 보기')`, `document.getElementById('notice').textContent`);
 }

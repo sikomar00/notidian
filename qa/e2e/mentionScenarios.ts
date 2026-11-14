@@ -46,8 +46,8 @@ const VISIBLE = q(`['graph-area', 'list-view', 'cleanup-view'].filter((id) => !$
 export async function mentionCleanup(browser: Browser, check: Check): Promise<void> {
   const demo = await browser.open(browser.ext('graph.html?mode=full&demo=1'));
   await waitFor(demo, `!!document.querySelector('#graph canvas')`);
-  await demo.run(`document.getElementById('cleanup-toggle').click()`);
-  await expect(check, demo, '정리: 버튼을 누르면 그래프 대신 언급 정리만 보임', `${VISIBLE} === 'cleanup-view' && document.getElementById('cleanup-toggle').getAttribute('aria-pressed') === 'true'`, VISIBLE);
+  await demo.run(`document.getElementById('view-cleanup').click()`);
+  await expect(check, demo, '정리: 버튼을 누르면 그래프 대신 언급 정리만 보임', `${VISIBLE} === 'cleanup-view' && document.getElementById('view-cleanup').getAttribute('aria-checked') === 'true'`, VISIBLE);
   await expect(check, demo, '정리: 글자가 적힌 페이지별 묶음, 많이 나온 순 → 제목 순', `${GROUPS} === '주간 회고 · 제목 1개 | 11월 2주 회의 · 제목 1개 | 메모 · 제목 1개 | 채용 계획 · 제목 1개'`, GROUPS);
   await demo.run(`document.querySelector('#cleanup-list button[aria-label="디자인 시스템 제목은 빼기"]').focus()`);
   await demo.press('Enter');
@@ -56,10 +56,10 @@ export async function mentionCleanup(browser: Browser, check: Check): Promise<vo
   await expect(check, demo, '정리: 뺀 제목 수와 되돌리기', `document.querySelector('#cleanup-ignored summary')?.textContent === '뺀 제목 1개 · 되돌리기'`);
   await expect(check, demo, '정리: 예시 모드는 뺀 제목을 저장하지 않음', `chrome.storage.local.get('ignoredMentionTitles').then((s) => s.ignoredMentionTitles === undefined)`);
   await demo.shot('cleanup');
-  await demo.run(`document.getElementById('cleanup-toggle').click()`);
+  await demo.run(`document.getElementById('view-graph').click()`);
   await pick(demo, '디자인 시');
   await expect(check, demo, '정리: 뺀 제목은 서랍 칸에서도 빠짐', `${NOTE} === '언급 정리에서 뺀 제목이라 찾지 않아요'`, NOTE);
-  await demo.run(`document.getElementById('cleanup-toggle').click()`);
+  await demo.run(`document.getElementById('view-cleanup').click()`);
   await waitFor(demo, `!!document.querySelector('#cleanup-ignored summary')`);
   await demo.run(`(() => { document.querySelector('#cleanup-ignored details').open = true; document.querySelector('#cleanup-ignored button').click(); })()`);
   await expect(check, demo, '정리: 다시 넣으면 묶음이 돌아옴', `document.querySelectorAll('#cleanup-list h3').length === 4 && document.getElementById('cleanup-ignored').children.length === 0`, GROUPS);
@@ -67,8 +67,15 @@ export async function mentionCleanup(browser: Browser, check: Check): Promise<vo
   await demo.run(`document.getElementById('isolated').click()`);
   await expect(check, demo, '정리: 외톨이 숨기기를 켜도 연결 없는 페이지의 언급은 남음', `${GROUPS}.includes('메모 · 제목 1개')`, GROUPS);
   await demo.run(`document.getElementById('isolated').click()`);
-  await demo.run(`document.getElementById('view-toggle').click()`);
-  await expect(check, demo, '정리: 목록 보기로 바꾸면 하나만 보임', `${VISIBLE} === 'list-view' && document.getElementById('cleanup-toggle').getAttribute('aria-pressed') === 'false'`, VISIBLE);
+  // 보기 전환은 라디오 묶음: 방향키로 옮기며 고르고, 언급 정리를 보는 동안 그림 저장은 안내만 한다
+  await demo.run(`document.getElementById('view-cleanup').click()`);
+  await demo.run(`document.getElementById('export-png').click()`);
+  await expect(check, demo, '정리: 언급 정리를 보는 동안 그림 저장은 안내만', `document.getElementById('notice').textContent.includes('"그래프" 보기')`, `document.getElementById('notice').textContent`);
+  await demo.run(`document.getElementById('view-cleanup').focus()`);
+  await demo.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 });
+  await expect(check, demo, '보기 전환: 방향키(←)로 목록을 고르고 초점도 옮김', `${VISIBLE} === 'list-view' && document.activeElement.id === 'view-list' && document.getElementById('view-list').tabIndex === 0 && document.getElementById('view-cleanup').tabIndex === -1`, VISIBLE);
+  await demo.run(`document.getElementById('view-list').click()`);
+  await expect(check, demo, '정리: 목록 보기로 바꾸면 하나만 보임', `${VISIBLE} === 'list-view' && document.getElementById('view-cleanup').getAttribute('aria-checked') === 'false'`, VISIBLE);
   demo.close();
 
   // 저장된 지도: 본문 글자 하나를 넣고 제목을 빼면 저장되고, 다시 열어도 빠져 있다
@@ -80,12 +87,12 @@ export async function mentionCleanup(browser: Browser, check: Check): Promise<vo
   })()`);
   await seeded.run(`location.reload()`);
   await waitFor(seeded, `!!document.querySelector('#graph canvas')`);
-  await seeded.run(`document.getElementById('cleanup-toggle').click()`);
+  await seeded.run(`document.getElementById('view-cleanup').click()`);
   await waitFor(seeded, `!!document.querySelector('#cleanup-list button[aria-label$="제목은 빼기"]')`);
   const removed = String(await seeded.run(`(() => { const b = document.querySelector('#cleanup-list button[aria-label$="제목은 빼기"]'); b.click(); return b.getAttribute('aria-label').replace(' 제목은 빼기', ''); })()`));
   await expect(check, seeded, '정리: 뺀 제목을 이 브라우저에 저장', `chrome.storage.local.get('ignoredMentionTitles').then((s) => JSON.stringify(s.ignoredMentionTitles) === ${JSON.stringify(JSON.stringify([removed]))})`, removed);
   await seeded.run(`location.reload()`);
   await waitFor(seeded, `!!document.querySelector('#graph canvas')`);
-  await seeded.run(`document.getElementById('cleanup-toggle').click()`);
+  await seeded.run(`document.getElementById('view-cleanup').click()`);
   await expect(check, seeded, '정리: 다시 열어도 뺀 제목은 빠져 있음', `document.querySelector('#cleanup-ignored summary')?.textContent === '뺀 제목 1개 · 되돌리기' && !document.getElementById('cleanup-list').textContent.includes(${JSON.stringify(removed)} + ' · ')`, removed);
 }
