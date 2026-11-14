@@ -11,6 +11,7 @@ import {
 } from '../../notion/endpoints.ts';
 import type { NotionObject, Requester } from '../../notion/endpoints.ts';
 import { extractFromBlock, extractFromProperties } from '../../notion/extractLinks.ts';
+import { pageText, TEXT_VERSION } from '../../notion/extractText.ts';
 import { summarizePage } from '../../notion/pageMapping.ts';
 import type { PageSummary } from '../../notion/pageMapping.ts';
 import { RateLimitedError } from '../../notion/retry.ts';
@@ -55,6 +56,8 @@ export async function beginCrawl(store: IndexStore, now: () => number): Promise<
 
 function needsRead(existing: PageRecord | undefined, summary: PageSummary): boolean {
   if (!existing || existing.status !== 'ok') return true;
+  // 본문 글자를 아직 이 규칙으로 모으지 않았으면 바뀌지 않았어도 읽는다(F-17)
+  if (existing.textVersion !== TEXT_VERSION) return true;
   if (summary.lastEdited === '' || existing.lastEdited !== summary.lastEdited) return true;
   return existing.readAt !== undefined && Date.parse(existing.readAt) - Date.parse(existing.lastEdited) < RECENT_EDIT_MS;
 }
@@ -94,6 +97,8 @@ async function absorbSearchResult(deps: CrawlDeps, item: NotionObject, run: { se
     status: pending ? 'pending' : 'ok',
     failCount: pending ? (existing?.failCount ?? 0) : 0,
     ...(existing?.readAt ? { readAt: existing.readAt } : {}),
+    // 다시 읽지 않는 페이지는 이미 모은 본문 글자 표시를 남긴다(없애면 다음 색인에서 전체를 다시 읽는다)
+    ...(!pending && existing?.textVersion !== undefined ? { textVersion: existing.textVersion } : {}),
     // 검색 결과에 속성이 이미 들어 있어서, 읽을 때 페이지를 다시 받지 않도록 연결만 남겨 둔다(P1-5)
     ...(pending ? { prefetched: { ...propertyLinksOf(item), crawl: run.crawl, at: iso(deps.now()) } } : {}),
   });
@@ -115,7 +120,8 @@ async function searchPhase(deps: CrawlDeps, state: CrawlState, deadline: number)
   return 'next';
 }
 
-async function collectTargets(request: Requester, id: string, props: PropertyLinks): Promise<string[]> {
+/** 페이지의 연결 대상과 본문 글자. 글자는 연결을 찾으려고 받은 블록에서 뽑아 요청이 늘지 않는다(NF-11). */
+async function collectTargets(request: Requester, id: string, props: PropertyLinks): Promise<{ targets: string[]; text: string }> {
   const targets = new Set(props.targets);
   try {
     for (const target of await readRelationOverflow(request, id, props.overflow)) targets.add(target);
@@ -126,17 +132,20 @@ async function collectTargets(request: Requester, id: string, props: PropertyLin
   const { blocks } = await readBlockTree(request, id);
   for (const block of blocks) for (const target of extractFromBlock(block)) targets.add(target);
   targets.delete(id);
-  return [...targets];
+  return { targets: [...targets], text: pageText(blocks) };
 }
 
 async function markUnreadable(deps: CrawlDeps, record: PageRecord, reason: UnreadableReason): Promise<void> {
   await deps.store.replaceLinks(record.id, []);
+  await deps.store.putText(record.id, '');
   await deps.store.putPage({ ...settled(record), status: 'unreadable', unreadableReason: reason, readAt: iso(deps.now()), failCount: 0 });
 }
 
 async function recordFailure(deps: CrawlDeps, record: PageRecord): Promise<void> {
   const failCount = record.failCount + 1;
   const status = failCount > MAX_FAILURES ? 'unreadable' : 'pending';
+  // 읽을 수 없게 된 페이지의 옛 글자가 다른 페이지의 연결 안 된 언급으로 남지 않게 지운다
+  if (status === 'unreadable') await deps.store.putText(record.id, '');
   await deps.store.putPage({
     ...(status === 'unreadable' ? settled(record) : record),
     status,
@@ -199,14 +208,17 @@ async function readOne(deps: CrawlDeps, id: string, crawl: string): Promise<stri
   if (!record) return [];
   const loaded = await loadPage(deps, record, crawl);
   if ('done' in loaded) return loaded.done;
-  let targets: string[];
+  let collected: { targets: string[]; text: string };
   try {
-    targets = await collectTargets(deps.request, id, loaded.props);
+    collected = await collectTargets(deps.request, id, loaded.props);
   } catch (error) {
     return handleReadError(deps, record, error);
   }
+  const { targets, text } = collected;
   const found = await discover(deps, targets);
   await deps.store.replaceLinks(id, targets);
+  // 글자를 먼저 저장한다. 그 사이에 끊기면 textVersion이 없어 다음에 다시 읽는다
+  await deps.store.putText(id, text);
   const { summary } = loaded;
   await deps.store.putPage({
     ...settled(record),
@@ -215,6 +227,7 @@ async function readOne(deps: CrawlDeps, id: string, crawl: string): Promise<stri
     ...(summary?.databaseId ? { databaseId: summary.databaseId } : {}),
     status: 'ok',
     failCount: 0,
+    textVersion: TEXT_VERSION,
     // 속성은 받아 둔 시각의 것이라, "수정 직후에 읽었으면 다음에 한 번 더 읽기"(시험 S-4)가 그 시각을 기준으로 판단하게 한다
     readAt: loaded.capturedAt ?? iso(deps.now()),
   });

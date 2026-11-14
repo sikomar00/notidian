@@ -1,4 +1,5 @@
 import { checkToken, probeAccess } from '../../notion/endpoints.ts';
+import { TEXT_VERSION } from '../../notion/extractText.ts';
 import { createNotionClient } from '../../notion/http.ts';
 import { withRetry } from '../../notion/retry.ts';
 import type { IndexCommand, SaveTokenReply, TokenKind } from '../messages.ts';
@@ -19,10 +20,11 @@ const RATE_LIMIT_MESSAGE = 'Notion이 요청을 잠시 막았어요. 1~2분 뒤 
 const store = openIdbStore();
 let running = false;
 let stopRequested = false;
-// 다시 만드는 동안 진행 상태를 새로 써도 마지막 완성 시각과 자동 실행 여부는 남긴다
-const carried = (progress: Progress): Pick<Progress, 'finishedAt' | 'auto'> => ({
+// 다시 만드는 동안 진행 상태를 새로 써도 마지막 완성 시각, 자동 실행 여부, 본문 처음 모으기 안내는 남긴다
+const carried = (progress: Progress): Pick<Progress, 'finishedAt' | 'auto' | 'collectingText'> => ({
   ...(progress.finishedAt === undefined ? {} : { finishedAt: progress.finishedAt }),
   ...(progress.auto ? { auto: true } : {}),
+  ...(progress.collectingText ? { collectingText: true } : {}),
 });
 
 async function readProgress(): Promise<Progress> {
@@ -40,7 +42,11 @@ async function finish(outcome: CrawlOutcome): Promise<void> {
   await chrome.alarms.clear(ALARM);
   const { read, discovered } = await store.counts();
   const keep = carried(await readProgress());
-  if (outcome.kind === 'done') await writeProgress({ ...keep, phase: 'done', read, discovered, finishedAt: Date.now() });
+  if (outcome.kind === 'done') {
+    // 다 만들었으면 본문 처음 모으기 안내도 끝난다
+    const { collectingText: _finished, ...rest } = keep;
+    await writeProgress({ ...rest, phase: 'done', read, discovered, finishedAt: Date.now() });
+  }
   // 사용자가 멈춘 것은 다음 주기에 이어 하지 않는다
   else if (outcome.kind === 'stopped') await writeProgress({ ...keep, auto: false, phase: 'paused', read, discovered });
   else if (outcome.reason === 'rate-limit') await writeProgress({ ...keep, phase: 'paused', read, discovered, lastError: RATE_LIMIT_MESSAGE });
@@ -97,7 +103,12 @@ export async function startIndex(auto = false): Promise<void> {
   const [progress, state] = await Promise.all([readProgress(), store.getCrawl()]);
   const resumable = state !== undefined && state.phase !== 'done' && (progress.phase === 'paused' || progress.phase === 'error');
   if (!resumable) await beginCrawl(store, Date.now);
-  await writeProgress({ ...carried(progress), auto, ...(await store.counts()), phase: 'running' });
+  // 업데이트 전에 만든 지도라 글자를 다시 모아야 하면 상태 줄에 알린다(F-17). 이어서 하는 경우는 전에 정한 값을 그대로 둔다
+  const { collectingText: previous, ...keep } = carried(progress);
+  const collectingText = resumable
+    ? previous === true
+    : (await store.listPages()).some((page) => page.status === 'ok' && page.textVersion !== TEXT_VERSION);
+  await writeProgress({ ...keep, ...(collectingText ? { collectingText } : {}), auto, ...(await store.counts()), phase: 'running' });
   stopRequested = false;
   void runChunk();
 }

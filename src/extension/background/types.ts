@@ -1,4 +1,6 @@
-import type { PageRecord, RawLink } from '../../graph/types.ts';
+import type { PageRecord, RawLink, StoredText } from '../../graph/types.ts';
+
+export type { StoredText };
 
 export type CrawlPhase = 'search' | 'read' | 'cleanup' | 'done';
 
@@ -26,6 +28,9 @@ export interface IndexStore {
   /** `from` 페이지의 나가는 연결을 통째로 바꾼다. */
   replaceLinks(from: string, targets: readonly string[]): Promise<void>;
   allLinks(): Promise<RawLink[]>;
+  /** 페이지 본문 글자를 저장한다(연결 안 된 언급용). 빈 문자열이면 지운다. */
+  putText(id: string, text: string): Promise<void>;
+  listTexts(): Promise<StoredText[]>;
   getCrawl(): Promise<CrawlState | undefined>;
   putCrawl(state: CrawlState): Promise<void>;
   counts(): Promise<Counts>;
@@ -45,6 +50,8 @@ export interface Progress {
   finishedAt?: number;
   /** 자동 다시 만들기가 시작한 실행인지. 이때는 화면 읽기 프로그램에 알리지 않고, 멈추면 다음 주기에 이어서 한다 */
   auto?: boolean;
+  /** 본문 글자를 처음 모으느라 바뀌지 않은 페이지까지 다시 읽는 중인지(F-17) */
+  collectingText?: boolean;
 }
 
 export const IDLE_PROGRESS: Progress = { phase: 'idle', read: 0, discovered: 0 };

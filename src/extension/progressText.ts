@@ -25,7 +25,8 @@ export function describeProgress(progress: Progress, now: number = Date.now()): 
       return '아직 연결 지도를 만들지 않았어요.';
     case 'running': {
       const waiting = progress.waitingUntil !== undefined && progress.waitingUntil > now;
-      return `연결 지도를 만드는 중이에요 · ${counts}${waiting ? ' (Notion이 잠시 쉬게 해서 기다리는 중이에요)' : ''}`;
+      const firstText = progress.collectingText ? ' · 본문을 처음 모으느라 이번엔 전체를 다시 읽어요' : '';
+      return `연결 지도를 만드는 중이에요 · ${counts}${firstText}${waiting ? ' (Notion이 잠시 쉬게 해서 기다리는 중이에요)' : ''}`;
     }
     case 'paused':
       return `멈췄어요 · ${counts}${progress.lastError ? ` (${progress.lastError})` : ''}`;

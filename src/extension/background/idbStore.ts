@@ -1,8 +1,9 @@
 import type { PageRecord, RawLink } from '../../graph/types.ts';
-import type { Counts, CrawlState, IndexStore } from './types.ts';
+import type { Counts, CrawlState, IndexStore, StoredText } from './types.ts';
 
 const DB_NAME = 'notidian';
-const DB_VERSION = 1;
+// 2: 본문 글자 `texts`(연결 안 된 언급)
+const DB_VERSION = 2;
 const CRAWL_KEY = 'state';
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
@@ -23,15 +24,25 @@ function finished(tx: IDBTransaction): Promise<void> {
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const opening = indexedDB.open(DB_NAME, DB_VERSION);
-    opening.onupgradeneeded = () => {
+    // 이미 만든 지도는 남기고 없는 저장소만 더한다
+    opening.onupgradeneeded = (event) => {
       const db = opening.result;
-      db.createObjectStore('pages', { keyPath: 'id' }).createIndex('status', 'status');
-      const links = db.createObjectStore('links', { keyPath: ['from', 'to'] });
-      links.createIndex('from', 'from');
-      links.createIndex('to', 'to');
-      db.createObjectStore('crawl');
+      if (event.oldVersion < 1) {
+        db.createObjectStore('pages', { keyPath: 'id' }).createIndex('status', 'status');
+        const links = db.createObjectStore('links', { keyPath: ['from', 'to'] });
+        links.createIndex('from', 'from');
+        links.createIndex('to', 'to');
+        db.createObjectStore('crawl');
+      }
+      if (event.oldVersion < 2) db.createObjectStore('texts', { keyPath: 'id' });
     };
-    opening.onsuccess = () => resolve(opening.result);
+    // 예전 버전 연결이 남아 있으면 버전 올리기가 끝없이 기다리므로 이유를 알린다
+    opening.onblocked = () => reject(new Error('다른 Notidian 화면이 예전 저장소를 쓰고 있어요. 열린 Notidian 탭을 모두 닫고 다시 열어 주세요'));
+    opening.onsuccess = () => {
+      // 다음에 버전을 올릴 때 이 연결이 막지 않게 스스로 닫는다
+      opening.result.onversionchange = () => opening.result.close();
+      resolve(opening.result);
+    };
     opening.onerror = () => reject(opening.error);
   });
 }
@@ -42,7 +53,7 @@ async function deleteLinksBy(links: IDBObjectStore, index: 'from' | 'to', id: st
   for (const key of keys) links.delete(key);
 }
 
-/** IndexedDB `notidian`에 색인을 저장한다. 본문 글은 저장하지 않는다. */
+/** IndexedDB `notidian`에 색인을 저장한다. 본문 글자는 연결 안 된 언급용으로 `texts`에 따로 둔다(ADR 0004). */
 class IdbStore implements IndexStore {
   private database: Promise<IDBDatabase> | undefined;
 
@@ -67,8 +78,9 @@ class IdbStore implements IndexStore {
   }
 
   async deletePage(id: string): Promise<void> {
-    const tx = await this.stores(['pages', 'links'], 'readwrite');
+    const tx = await this.stores(['pages', 'links', 'texts'], 'readwrite');
     tx.objectStore('pages').delete(id);
+    tx.objectStore('texts').delete(id);
     const links = tx.objectStore('links');
     await deleteLinksBy(links, 'from', id);
     await deleteLinksBy(links, 'to', id);
@@ -98,6 +110,18 @@ class IdbStore implements IndexStore {
     return request<RawLink[]>(tx.objectStore('links').getAll());
   }
 
+  async putText(id: string, text: string): Promise<void> {
+    const tx = await this.stores(['texts'], 'readwrite');
+    if (text === '') tx.objectStore('texts').delete(id);
+    else tx.objectStore('texts').put({ id, text } satisfies StoredText);
+    await finished(tx);
+  }
+
+  async listTexts(): Promise<StoredText[]> {
+    const tx = await this.stores(['texts'], 'readonly');
+    return request<StoredText[]>(tx.objectStore('texts').getAll());
+  }
+
   async getCrawl(): Promise<CrawlState | undefined> {
     const tx = await this.stores(['crawl'], 'readonly');
     return request<CrawlState | undefined>(tx.objectStore('crawl').get(CRAWL_KEY));
@@ -117,8 +141,9 @@ class IdbStore implements IndexStore {
   }
 
   async clear(): Promise<void> {
-    const tx = await this.stores(['pages', 'links', 'crawl'], 'readwrite');
-    for (const name of ['pages', 'links', 'crawl']) tx.objectStore(name).clear();
+    const names = ['pages', 'links', 'crawl', 'texts'];
+    const tx = await this.stores(names, 'readwrite');
+    for (const name of names) tx.objectStore(name).clear();
     await finished(tx);
   }
 }
