@@ -174,10 +174,13 @@ test('중단하면 멈추고, 다시 돌리면 이어서 끝난다', async () =>
 test('바뀐 게 없으면 검색만 하고 아무 페이지도 다시 읽지 않는다(F-6)', async () => {
   const h = harness();
   await crawlAll(h);
-  h.clock.t += 3_600_000;
-  h.fake.calls.length = 0;
-  await crawlAll(h);
-  assert.deepEqual(h.fake.calls, ['POST /v1/search']);
+  // 두 번, 세 번 다시 만들어도 마찬가지다(다시 읽지 않은 페이지가 글자 표시를 잃지 않는다)
+  for (let run = 0; run < 2; run += 1) {
+    h.clock.t += 3_600_000;
+    h.fake.calls.length = 0;
+    await crawlAll(h);
+    assert.deepEqual(h.fake.calls, ['POST /v1/search']);
+  }
 });
 
 test('고친 페이지만 다시 읽고 지운 연결은 사라진다(F-6)', async () => {
@@ -354,15 +357,87 @@ test('한 페이지가 5xx로 실패해도 색인은 끝나고, 다음 색인에
   assert.equal((await h.store.getPage(B))?.failCount, 0);
 });
 
-test('계속 실패하는 페이지는 4번째에 읽을 수 없음(error)으로 바꾼다', async () => {
+test('계속 실패하는 페이지는 4번째에 읽을 수 없음(error)으로 바꾸고 글자도 지운다', async () => {
   const h = harness(buildWorld(), { retry: true });
+  await crawlAll(h);
+  assert.ok(h.store.texts.has(B), '처음엔 읽혀서 글자가 있다');
+  const pageB = h.fake.pages.get(B);
+  assert.ok(pageB);
   const bad = { status: 503, body: { code: 'service_unavailable' } };
   for (let run = 0; run < 4; run += 1) {
+    h.clock.t += 3_600_000;
+    pageB.edited = new Date(h.clock.t).toISOString();
     h.fake.inject(`/v1/blocks/${B}/`, bad, bad, bad);
     await crawlAll(h);
-    h.clock.t += 3_600_000;
   }
   const record = await h.store.getPage(B);
   assert.equal(record?.status, 'unreadable');
   assert.equal(record?.unreadableReason, 'error');
+  assert.equal(h.store.texts.has(B), false);
+});
+
+test('본문 글자를 연결과 함께 저장하고, 요청 수는 기능 전과 같다(F-16, NF-11)', async () => {
+  const fake = buildWorld();
+  const pageD = fake.pages.get(D);
+  assert.ok(pageD);
+  pageD.blocks = [
+    paragraph('d1', { type: 'text', text: { content: '회의록 참고', link: null }, plain_text: '회의록 참고' }, mention(A)),
+    { id: 'd2', type: 'code', code: { rich_text: [{ type: 'text', plain_text: '회의록' }] } },
+  ];
+  const h = harness(fake);
+  await crawlAll(h);
+  // 기능 전 코드에서 같은 데이터로 잰 값: 처음 14번, A만 고친 다시 만들기 3번
+  assert.equal(h.fake.calls.length, 14);
+  assert.equal(h.store.texts.get(D), '회의록 참고', '@언급 글자와 코드 블록은 빼고');
+  assert.equal(h.store.texts.has(E), false, '글자가 없는 페이지는 저장하지 않는다');
+  assert.equal((await h.store.getPage(D))?.textVersion, 1);
+  h.clock.t += 3_600_000;
+  const pageA = h.fake.pages.get(A);
+  assert.ok(pageA);
+  pageA.edited = '2026-11-13T08:30:00.000Z';
+  h.fake.calls.length = 0;
+  await crawlAll(h);
+  assert.equal(h.fake.calls.length, 3);
+});
+
+test('글자를 모은 적 없는 지도는 다음 다시 만들기에서 한 번만 전체를 다시 읽는다(F-17)', async () => {
+  const h = harness();
+  await crawlAll(h);
+  const firstBlockReads = h.fake.count('GET /v1/blocks/');
+  // 업데이트 전 지도처럼 글자와 버전을 지운다
+  for (const page of h.store.pages.values()) delete page.textVersion;
+  h.store.texts.clear();
+  h.clock.t += 3_600_000;
+  h.fake.calls.length = 0;
+  await crawlAll(h);
+  assert.equal(h.fake.count('GET /v1/blocks/'), firstBlockReads, '처음 만들 때처럼 모든 페이지의 본문을 다시 읽는다');
+  assert.ok(h.store.texts.size > 0);
+  for (let run = 0; run < 2; run += 1) {
+    h.clock.t += 3_600_000;
+    h.fake.calls.length = 0;
+    await crawlAll(h);
+    assert.deepEqual(h.fake.calls, ['POST /v1/search'], `다시 읽은 뒤 ${run + 1}번째`);
+  }
+});
+
+test('읽을 수 없게 되거나 지워진 페이지의 글자, 저장된 데이터 지우기는 글자도 지운다(F-16)', async () => {
+  const fake = buildWorld();
+  for (const id of [D, E]) {
+    const target = fake.pages.get(id);
+    assert.ok(target);
+    target.blocks = [paragraph(`${id}-t`, { type: 'text', plain_text: '글자' })];
+  }
+  const h = harness(fake);
+  await crawlAll(h);
+  assert.ok(h.store.texts.has(D) && h.store.texts.has(E));
+  h.clock.t += 3_600_000;
+  h.fake.pages.delete(D);
+  const pageE = h.fake.pages.get(E);
+  assert.ok(pageE);
+  pageE.inTrash = true;
+  await crawlAll(h);
+  assert.equal(h.store.texts.has(D), false, '접근을 잃은 페이지');
+  assert.equal(h.store.texts.has(E), false, '휴지통에 간 페이지');
+  await h.store.clear();
+  assert.deepEqual(await h.store.listTexts(), []);
 });

@@ -1,11 +1,12 @@
 import type { PageRecord, RawLink } from '../../src/graph/types.ts';
-import type { Counts, CrawlState, IndexStore } from '../../src/extension/background/types.ts';
+import type { Counts, CrawlState, IndexStore, StoredText } from '../../src/extension/background/types.ts';
 
 /** 테스트용 메모리 저장소. IndexedDB처럼 값을 복사해서 주고받는다. */
 export class MemoryStore implements IndexStore {
   pages = new Map<string, PageRecord>();
   links = new Map<string, string[]>();
   crawl: CrawlState | undefined;
+  texts = new Map<string, string>();
 
   async getPage(id: string): Promise<PageRecord | undefined> {
     const page = this.pages.get(id);
@@ -18,6 +19,7 @@ export class MemoryStore implements IndexStore {
 
   async deletePage(id: string): Promise<void> {
     this.pages.delete(id);
+    this.texts.delete(id);
     this.links.delete(id);
     for (const [from, targets] of this.links) {
       const kept = targets.filter((target) => target !== id);
@@ -43,6 +45,15 @@ export class MemoryStore implements IndexStore {
     return [...this.links].flatMap(([from, targets]) => targets.map((to) => ({ from, to })));
   }
 
+  async putText(id: string, text: string): Promise<void> {
+    if (text === '') this.texts.delete(id);
+    else this.texts.set(id, text);
+  }
+
+  async listTexts(): Promise<StoredText[]> {
+    return [...this.texts].map(([id, text]) => ({ id, text }));
+  }
+
   async getCrawl(): Promise<CrawlState | undefined> {
     return this.crawl ? structuredClone(this.crawl) : undefined;
   }
@@ -59,6 +70,7 @@ export class MemoryStore implements IndexStore {
   async clear(): Promise<void> {
     this.pages.clear();
     this.links.clear();
+    this.texts.clear();
     this.crawl = undefined;
   }
 
@@ -67,6 +79,7 @@ export class MemoryStore implements IndexStore {
     const pages = [...this.pages.values()]
       .map(({ readAt: _readAt, checkedAt: _checkedAt, ...rest }) => rest)
       .sort((a, b) => a.id.localeCompare(b.id));
-    return { pages, links: [...this.links].sort(([a], [b]) => a.localeCompare(b)) };
+    const texts = [...this.texts].sort(([a], [b]) => a.localeCompare(b));
+    return { pages, links: [...this.links].sort(([a], [b]) => a.localeCompare(b)), texts };
   }
 }

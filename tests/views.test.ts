@@ -5,6 +5,7 @@ import { unknownDatabases } from '../src/extension/background/databaseNames.ts';
 import { buildGraph } from '../src/graph/buildGraph.ts';
 import { linksCsv, pagesCsv, toCsv } from '../src/graph/exportCsv.ts';
 import { demoData } from '../src/graph/demoData.ts';
+import { findUnlinkedMentions, prepareTexts } from '../src/graph/unlinkedMentions.ts';
 import { applyFilters, hideIsolated, localSubgraph, SHOW_ALL } from '../src/graph/filter.ts';
 import type { PageRecord } from '../src/graph/types.ts';
 import { fetchDataSourceTitle } from '../src/notion/endpoints.ts';
@@ -139,6 +140,14 @@ test('예시 데이터: 모든 연결이 있는 페이지를 가리키고, 그�
   assert.ok(graph.nodes.some((n) => n.degree === 0), '연결 없는 페이지');
   assert.equal(new Set(graph.nodes.flatMap((n) => (n.group ? [n.group] : []))).size, 3, 'DB 세 개');
   for (const group of new Set(sample.pages.flatMap((p) => (p.databaseId ? [p.databaseId] : [])))) assert.ok(group in sample.databaseNames, group);
+  // 연결 안 된 언급(F-22): 가짜 본문은 있는 페이지 것이고, 결과가 있는 페이지와 이미 연결돼 빠지는 페이지가 함께 드러난다
+  for (const text of sample.texts) assert.ok(ids.has(text.id), text.id);
+  const titled = prepareTexts(sample.texts, (id) => sample.pages.find((p) => p.id === id)?.title);
+  const linkedFrom = new Set(sample.links.filter((l) => l.to === 'demo-design').map((l) => l.from));
+  const found = findUnlinkedMentions({ id: 'demo-design', title: '디자인 시스템' }, titled, linkedFrom);
+  assert.ok(found !== 'too-short');
+  assert.deepEqual(found.map((m) => m.id), ['demo-retro', 'demo-meet-2']);
+  assert.ok(linkedFrom.has('demo-meet-design') && sample.texts.some((t) => t.id === 'demo-meet-design'), '이미 연결된 페이지의 글자');
 });
 
 test('CSV 내보내기: 엑셀용 BOM·CRLF, 쉼표·따옴표 감싸기, 수식으로 시작하는 제목은 글자로(P2-8)', () => {
