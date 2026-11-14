@@ -1,4 +1,4 @@
-import type { PageRecord, RawLink } from './types.ts';
+import type { PageRecord, RawLink, StoredText } from './types.ts';
 
 /**
  * 토큰 없이 둘러보는 예시 워크스페이스(P2-7). 실제 노션과 상관없는 가짜 데이터이고 저장하지 않는다.
@@ -8,6 +8,8 @@ export interface DemoData {
   pages: PageRecord[];
   links: RawLink[];
   databaseNames: Record<string, string>;
+  /** 연결 안 된 언급을 보여 주려는 가짜 본문 */
+  texts: StoredText[];
 }
 
 const PAGES: [id: string, title: string, database?: string, parent?: string][] = [
@@ -23,7 +25,7 @@ const PAGES: [id: string, title: string, database?: string, parent?: string][] =
   ['market', '경쟁사 분석'],
   ['hiring', '채용 계획'],
   ['metrics', '지표 대시보드'],
-  ['memo', '개인 메모'],
+  ['memo', '메모'],
   ['task-login', '로그인 화면 만들기', 'db-tasks'],
   ['task-search', '검색 개선', 'db-tasks'],
   ['task-bug', '버그: 그래프 깜빡임', 'db-tasks'],
@@ -47,6 +49,15 @@ const LINKS: [from: string, to: string][] = [
   ['task-docs', 'onboarding'], ['task-docs', 'api'], ['metrics', 'hiring'], ['hiring', 'locked'],
 ];
 
+// "디자인 시스템"은 회고·회의에 글자로만 나오고(연결 안 된 언급), 디자인 리뷰는 이미 연결이 있어 빠진다. "메모"는 제목이 짧아 찾지 않는다
+const TEXTS: [id: string, text: string][] = [
+  ['retro', '이번 주에는 디자인 시스템의 버튼 색을 정리했다\n다음 주에도 디자인 시스템 문서를 이어서 본다'],
+  ['meet-2', '참석: 기획·개발\n로그인 화면은 디자인 시스템 규칙을 따른다'],
+  ['meet-design', '디자인 시스템 v2 검토'],
+  ['hiring', '면접 과제는 API 명세를 읽고 질문을 만드는 것'],
+  ['memo', '로드맵 2027을 다시 읽어 보기'],
+];
+
 export function demoData(): DemoData {
   const page = ([id, title, database, parent]: (typeof PAGES)[number]): PageRecord => ({
     id: `demo-${id}`,
@@ -64,5 +75,6 @@ export function demoData(): DemoData {
     pages: [...PAGES.map(page), locked],
     links: LINKS.map(([from, to]) => ({ from: `demo-${from}`, to: `demo-${to}` })),
     databaseNames: { 'db-tasks': '할 일', 'db-meetings': '회의', 'db-refs': '자료' },
+    texts: TEXTS.map(([id, text]) => ({ id: `demo-${id}`, text })),
   };
 }

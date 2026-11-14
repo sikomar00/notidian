@@ -18,6 +18,8 @@ export interface PageRecord {
   /** 읽지 않고 존재만 확인한 시각(검색에 안 나오는 페이지를 다시 확인할 때) */
   checkedAt?: string;
   failCount: number;
+  /** 본문 글자를 이 규칙 버전(`TEXT_VERSION`)으로 모았는지. 다르거나 없으면 다음 다시 만들기에서 다시 읽는다(F-17) */
+  textVersion?: number;
   /** 검색이나 존재 확인 때 받은 페이지 속성에서 미리 뽑은 연결. 같은 색인(`crawl` = 시작 시각) 안에서 읽을 때 페이지를 다시 받지 않으려고 둔다. `at`은 속성을 받은 시각 */
   prefetched?: PropertyLinks & { crawl: string; at: string };
 }
@@ -26,6 +28,12 @@ export interface PageRecord {
 export interface PropertyLinks {
   targets: string[];
   overflow: string[];
+}
+
+/** 저장된 페이지 본문 글자(연결 안 된 언급용). 블록마다 한 줄. */
+export interface StoredText {
+  id: string;
+  text: string;
 }
 
 export interface RawLink {
