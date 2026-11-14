@@ -15,11 +15,14 @@ import { byId } from '../dom.ts';
 import { isViewMode } from '../messages.ts';
 import type { Message, ViewMode } from '../messages.ts';
 import { hasToken as tokenPresent, tokenChanged } from '../tokenStore.ts';
-import { renderDatabaseLegend } from './databaseLegend.ts';
 import { renderLinks } from './linksPanel.ts';
 import { createMentionsController } from './mentionsController.ts';
 import { setupRadioGroup } from './radioGroup.ts';
 import { createPathPanel } from './pathPanel.ts';
+import { createLinkTooltip } from './linkTooltip.ts';
+import { createColorsController } from './colorsController.ts';
+import { setupResurface } from './resurfacePanel.ts';
+import { timeAgo } from '../progressText.ts';
 import { followTabs } from './follow.ts';
 import { createListView } from './listview.ts';
 import { openDemoTab } from '../containers.ts';
@@ -46,7 +49,6 @@ const store = openIdbStore();
 const container = byId('graph');
 const hierarchyBox = byId<HTMLInputElement>('hierarchy');
 const isolatedBox = byId<HTMLInputElement>('isolated');
-const dbColorsBox = byId<HTMLInputElement>('db-colors');
 const localBox = byId<HTMLInputElement>('local');
 const localDepth = byId<HTMLSelectElement>('local-depth');
 const notice = byId('notice');
@@ -114,6 +116,18 @@ function setLinks(links: RawLink[]): void {
   rawLinks = links;
   evidenceByKey = new Map(links.map((link) => [`${link.from}\u0000${link.to}`, link.evidence]));
 }
+// 점 색: DB별 색과 색 그룹(F-35)
+const colors = createColorsController({
+  demo,
+  palette,
+  notice,
+  graph: () => fullGraph,
+  pages: () => pagesById,
+  view: () => view,
+  redrawSelection: () => renderSelection(),
+});
+// 선 위 근거 말풍선(F-33)
+const linkTooltip = createLinkTooltip(byId('graph-area'), { titleOf: (id) => rowsById.get(id)?.title ?? id, evidenceOf });
 // 경로 찾기(F-31): 고른 페이지에서 다른 페이지까지
 let currentPath: string[] | null = null;
 const paths = createPathPanel({
@@ -142,6 +156,10 @@ function renderSelection(): void {
   const row = selectedId === null ? undefined : rowsById.get(selectedId);
   byId('selection').hidden = row === undefined;
   byId('sel-title').textContent = row?.title ?? '';
+  // 색만으로 구분하지 않도록 색 그룹을 글자로 적고(F-37), 오래 안 고친 페이지인지 보이게 마지막 수정도 적는다(F-38)
+  const group = row ? colors.groupOf(row.id) : undefined;
+  const edited = Date.parse(row ? (pagesById.get(row.id)?.lastEdited ?? '') : '');
+  byId('sel-meta').textContent = [group && `그룹: ${group}`, Number.isFinite(edited) && `마지막 수정: ${timeAgo(edited, Date.now())}`].filter(Boolean).join(' · ');
   renderLinks(row ? linkedPages(fullGraph, row.id) : undefined, select, (other, direction) =>
     row ? (direction === 'in' ? evidenceOf(other, row.id) : evidenceOf(row.id, other)) : undefined,
   );
@@ -158,6 +176,8 @@ const search = setupSearch({ input: searchInput, list: byId<HTMLUListElement>('s
 const list = createListView(byId<HTMLTableSectionElement>('list-body'), byId('list-note'), openById);
 
 function applyData(target: GraphView): void {
+  // 다시 그리면 마우스를 올려 둔 선이 바뀌거나 사라질 수 있어 말풍선을 닫는다(다음 움직임에 다시 판정)
+  linkTooltip.hide();
   target.setData(lastGraph);
   applyFocus(target);
 }
@@ -213,9 +233,10 @@ function ensureView(): GraphView | undefined {
     onSettled: () => {
       if (autoFit) view?.fit();
     },
+    onLinkHover: (link, point) => (link ? linkTooltip.show(link, point) : linkTooltip.hide()),
   });
   // 옆 패널처럼 그래프를 늦게 만들면 그 전에 정한 DB별 색과 찾아 둔 경로를 넘긴다
-  view.setGroupColors(groupColors);
+  colors.applyTo(view);
   view.setPath(currentPath);
   return view;
 }
@@ -235,7 +256,7 @@ function rebuild(): void {
   kindVisible = new Set(filtered.nodes.flatMap((node) => (node.unreadable ? [] : [node.id])));
   // 지금 페이지와 선택한 페이지는 외톨이여도 남긴다(숨기면 찾을 수도, 따라갈 수도 없다)
   fullGraph = isolatedBox.checked ? hideIsolated(filtered, [focusId, selectedId]) : filtered;
-  applyDatabaseColors();
+  colors.rebuilt();
   rows = buildRows(fullGraph);
   rowsById = new Map(rows.map((row) => [row.id, row]));
   // 숨겨진 목록은 다시 그리지 않고, 보일 때 그린다
@@ -303,6 +324,7 @@ function showView(next: typeof shown): void {
   shown = next;
   markView(VIEWS.indexOf(next));
   byId('graph-area').hidden = next !== 'graph';
+  if (next !== 'graph') linkTooltip.hide();
   byId('list-view').hidden = next !== 'list';
   byId('cleanup-view').hidden = next !== 'cleanup';
   if (next === 'list') list.setRows(rows);
@@ -339,24 +361,6 @@ byId('sel-clear').addEventListener('click', () => {
 hierarchyBox.addEventListener('change', rebuild);
 isolatedBox.addEventListener('change', rebuild);
 
-// DB별 색: 이름은 지도를 다 만들 때 서비스 워커가 저장한다. 처음 알게 된 순서대로 색을 줘서 새 DB가 생겨도 기존 색은 그대로다
-let databaseNames: Record<string, string> = {};
-let databaseNamesError: string | undefined;
-let groupColors: Map<string, string> | null = null;
-// 지금 그래프에 있는 DB끼리만 색 순서를 매긴다(지워진 DB가 색 칸을 차지하지 않게). 순서는 처음 알게 된 순서
-function applyDatabaseColors(): void {
-  const present = new Set(fullGraph.nodes.flatMap((node) => (node.group ? [node.group] : [])));
-  const names = Object.fromEntries(Object.entries(databaseNames).filter(([id]) => present.has(id)));
-  groupColors = renderDatabaseLegend(byId('db-legend'), dbColorsBox.checked ? { names, error: databaseNamesError } : null, palette);
-  view?.setGroupColors(groupColors);
-}
-dbColorsBox.addEventListener('change', applyDatabaseColors);
-if (!demo) chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local' || (!changes.databaseNames && !changes.databaseNamesError)) return;
-  if (changes.databaseNames) databaseNames = (changes.databaseNames.newValue as Record<string, string> | undefined) ?? {};
-  if (changes.databaseNamesError) databaseNamesError = changes.databaseNamesError.newValue as string | undefined;
-  applyDatabaseColors();
-});
 for (const control of [localBox, localDepth]) {
   control.addEventListener('change', () => {
     autoFit = true;
@@ -431,9 +435,8 @@ async function init(): Promise<void> {
     tokenPresent(),
   ]);
   status.setHasToken(present);
-  await mentions.init();
-  databaseNames = (local.databaseNames as Record<string, string> | undefined) ?? {};
-  databaseNamesError = local.databaseNamesError as string | undefined;
+  await Promise.all([mentions.init(), colors.init()]);
+  colors.setDatabaseNames((local.databaseNames as Record<string, string> | undefined) ?? {}, local.databaseNamesError as string | undefined);
   const progress = (local.progress as Progress | undefined) ?? IDLE_PROGRESS;
   status.setProgress(progress);
   mentions.progress(progress.phase);
@@ -447,11 +450,10 @@ function showDemo(): void {
   rawPages = sample.pages;
   setLinks(sample.links);
   pagesById = new Map(sample.pages.map((page) => [page.id, page]));
-  databaseNames = sample.databaseNames;
-  databaseNamesError = undefined;
+  colors.setDatabaseNames(sample.databaseNames, undefined);
   byId('demo-banner').hidden = false;
-  // 예시를 보는 동안 내 연결 지도의 상태·버튼은 헷갈리므로 숨긴다
-  byId('status-row').hidden = true;
+  // 예시를 보는 동안 내 연결 지도의 상태·버튼은 헷갈리므로 숨긴다(다시 볼 페이지는 예시에서도 쓴다)
+  for (const id of ['status', 'reindex']) byId(id).hidden = true;
   rebuild();
 }
 
@@ -461,12 +463,19 @@ function leaveDemo(): void {
 }
 
 byId('demo-exit').addEventListener('click', leaveDemo);
+// 다시 볼 페이지(F-38): 꺼낸 페이지는 고른 것처럼 가운데로 옮기고 패널을 연다
+// 키보드로 "다른 페이지"를 거듭 누를 수 있게 초점은 버튼에 두고, 꺼낸 페이지는 화면 읽기 프로그램에 알린다
+setupResurface(() => rows, () => pagesById, (id) => {
+  select(id);
+  byId('resurface').focus();
+  byId('live').textContent = `꺼낸 페이지: ${rowsById.get(id)?.title ?? ''}`;
+});
 setupExport(
   {
     graph: () => fullGraph,
     rows: () => rows,
     pages: () => pagesById,
-    databaseNames: () => databaseNames,
+    databaseNames: () => colors.databaseNames(),
     // 예시 페이지는 실제 노션 주소가 없다
     urlOf: (id) => (demo ? '' : pageUrl(id, pagesById.get(id)?.url)),
     // 목록·언급 정리를 보는 동안은 그래프가 가려져 그림을 저장하지 않는다

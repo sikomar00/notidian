@@ -7,6 +7,12 @@ export interface Palette {
   databases: readonly [string, string];
   /** 셋째 DB부터 묶는 "기타 DB" 색. "읽을 수 없음"(회색 점선 테두리)과 모양도 밝기도 다르게 한다 */
   otherDatabase: string;
+  /**
+   * 색 그룹(F-35) 여섯 색. 이름은 GROUP_COLOR_NAMES와 같은 차례다. 바탕과 3:1 이상.
+   * shortcut: 여섯 색끼리·DB 색과의 색각 이상 구분은 검사하지 않았다(초록·빨강 계열이 DB 색과 비슷하다). 색만으로 구분하지 않도록
+   * 범례 글자와 패널의 "그룹:" 줄을 둔다. 헷갈린다는 의견이 나오면 그룹 점에 무늬(테두리 모양)를 더한다
+   */
+  groups: readonly string[];
   unreadable: string;
   link: string;
   /** 점이 많아 선을 가늘게 그릴 때의 선 색. 가는 선은 테두리가 흐려져서 더 진하게(어두운 테마는 더 밝게) 한다 */
@@ -30,6 +36,7 @@ export const LIGHT: Palette = {
   dbItem: LIGHT_DB,
   databases: [LIGHT_DB, '#0e7c56'],
   otherDatabase: '#374151',
+  groups: ['#7c3aed', '#be185d', '#15803d', '#0e7490', '#b91c1c', '#4d7c0f'],
   unreadable: '#6b7280',
   link: '#8a8a8a',
   thinLink: '#3b4150',
@@ -44,6 +51,7 @@ export const DARK: Palette = {
   dbItem: DARK_DB,
   databases: [DARK_DB, '#22a878'],
   otherDatabase: '#d1d5db',
+  groups: ['#a78bfa', '#f472b6', '#4ade80', '#22d3ee', '#f87171', '#a3e635'],
   unreadable: '#a0a7b4',
   link: '#8a8a8a',
   thinLink: '#c4c9d4',
@@ -58,6 +66,9 @@ export const DARK: Palette = {
 export function databaseColors(order: readonly string[], palette: Palette): Map<string, string> {
   return new Map(order.map((id, index) => [id, palette.databases[index] ?? palette.otherDatabase]));
 }
+
+/** 색 그룹 색의 이름(고르는 칸에 쓴다). palette.groups와 같은 차례 */
+export const GROUP_COLOR_NAMES = ['보라', '분홍', '초록', '청록', '빨강', '연두'] as const;
 
 export function currentPalette(): Palette {
   return matchMedia('(prefers-color-scheme: dark)').matches ? DARK : LIGHT;

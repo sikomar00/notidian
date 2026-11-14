@@ -1,6 +1,7 @@
 import { checkToken, probeAccess } from '../../notion/endpoints.ts';
 import { TEXT_VERSION } from '../../notion/extractText.ts';
 import { IGNORED_KEY } from '../ignoredTitles.ts';
+import { GROUPS_KEY } from '../../graph/colorGroups.ts';
 import { createNotionClient } from '../../notion/http.ts';
 import { withRetry } from '../../notion/retry.ts';
 import type { IndexCommand, SaveTokenReply, TokenKind } from '../messages.ts';
@@ -129,7 +130,7 @@ async function clearIndex(): Promise<void> {
   await stopIndex();
   while (running) await new Promise((resolve) => setTimeout(resolve, 100));
   await store.clear();
-  await chrome.storage.local.remove(['databaseNames', IGNORED_KEY]);
+  await chrome.storage.local.remove(['databaseNames', IGNORED_KEY, GROUPS_KEY]);
   // 예전 시험 패널이 남긴 페이지 목록 사본도 지운다(패널은 지웠지만 이미 저장된 사본이 남아 있을 수 있다)
   await chrome.storage.local.remove('spikeSnapshot');
   await writeProgress(IDLE_PROGRESS);

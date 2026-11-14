@@ -1,12 +1,15 @@
 import type { Progress } from './background/types.ts';
 
-/** 지난 시각을 "방금·N분 전·N시간 전·N일 전"으로 말한다. */
+/** 지난 시각을 "방금·N분 전·N시간 전·N일 전·N개월 전·N년 전"으로 말한다. */
 export function timeAgo(at: number, now: number): string {
   const minutes = Math.floor(Math.max(0, now - at) / 60_000);
   if (minutes < 1) return '방금';
   if (minutes < 60) return `${minutes}분 전`;
   const hours = Math.floor(minutes / 60);
-  return hours < 24 ? `${hours}시간 전` : `${Math.floor(hours / 24)}일 전`;
+  if (hours < 24) return `${hours}시간 전`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}일 전`;
+  return days < 365 ? `${Math.floor(days / 30)}개월 전` : `${Math.floor(days / 365)}년 전`;
 }
 
 /** "N분 전 갱신"이 낡지 않게 1분마다 다시 쓴다. 완성 시각이 보일 때만 바꾼다. */

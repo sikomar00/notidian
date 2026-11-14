@@ -1,6 +1,8 @@
 import ForceGraph from 'force-graph';
 import { neighborMap } from '../../graph/neighbors.ts';
 import type { GraphData, GraphLink, GraphNode } from '../../graph/types.ts';
+import type { Segment } from './hitTest.ts';
+import { setupHover } from './hover.ts';
 import { fitLabel, LABEL_PRIORITY, labelPriority, MAX_LABEL_WIDTH, pickLabels, pullFor } from './labels.ts';
 import type { LabelBox } from './labels.ts';
 import type { Palette } from './palette.ts';
@@ -18,6 +20,8 @@ export interface GraphView {
   resize(width: number, height: number): void;
   /** DB 항목을 DB별 색으로 칠한다(null이면 한 색). */
   setGroupColors(colors: Map<string, string> | null): void;
+  /** 색 그룹(F-35): 점 ID → 색. DB별 색보다 먼저 쓴다. null이면 지운다 */
+  setNodeColors(colors: ReadonlyMap<string, string> | null): void;
   /** 경로 찾기의 길(점 ID 차례)을 굵은 선과 이름표로 강조한다. null이면 지운다(F-31) */
   setPath(ids: readonly string[] | null): void;
 }
@@ -38,6 +42,11 @@ interface ViewState {
   /** 경로 찾기의 길 위 점과 선(양쪽 방향 열쇠 `a\u0000b`) */
   pathNodes: Set<string>;
   pathLinks: Set<string>;
+  /** 색 그룹으로 정한 점 색(없으면 종류·DB별 색) */
+  nodeColors: ReadonlyMap<string, string> | null;
+  /** 지금 그린 선(force-graph가 끝을 점 객체로 바꾼 사본)과 마우스를 올린 선 */
+  links: GraphLink[];
+  hoverLink: GraphLink | null;
 }
 
 const LABEL_ZOOM = 1.6;
@@ -86,19 +95,20 @@ function isRelated(state: ViewState, id: string): boolean {
 }
 
 function isActive(state: ViewState, link: GraphLink): boolean {
+  if (link === state.hoverLink) return true;
   const [source, target] = [idOf(link.source), idOf(link.target)];
   if (state.pathLinks.has(`${source}\u0000${target}`)) return true;
   return state.hoverId !== null && (source === state.hoverId || target === state.hoverId);
 }
 
-// 그래프 좌표 (x, y)에 가장 가까운 점. 점 가장자리에서 2만큼 여유를 둔다
-function nodeAt(state: ViewState, x: number, y: number): ViewNode | undefined {
+// 그래프 좌표 (x, y)에 가장 가까운 점. 점 가장자리에서 `margin`(최소 2)만큼 여유를 둔다
+function nodeAt(state: ViewState, x: number, y: number, margin = 2): ViewNode | undefined {
   let nearest: ViewNode | undefined;
   let nearestGap = Infinity;
   for (const node of state.nodes.values()) {
     if (node.x === undefined || node.y === undefined) continue;
     const gap = Math.hypot(node.x - x, node.y - y) - radiusOf(node);
-    if (gap <= 2 && gap < nearestGap) {
+    if (gap <= Math.max(2, margin) && gap < nearestGap) {
       nearest = node;
       nearestGap = gap;
     }
@@ -136,7 +146,7 @@ function drawNode(state: ViewState, node: ViewNode, ctx: CanvasRenderingContext2
     ctx.stroke();
     ctx.setLineDash([]);
   } else {
-    ctx.fillStyle = node.kind === 'page' ? palette.page : dbItemColor(state, node);
+    ctx.fillStyle = state.nodeColors?.get(node.id) ?? (node.kind === 'page' ? palette.page : dbItemColor(state, node));
     fillShape(ctx, node, radius);
   }
   if (state.pathNodes.has(node.id) && node.id !== state.focusId) {
@@ -284,26 +294,15 @@ function createRedrawScheduler(graph: ViewGraph): () => void {
   };
 }
 
-// force-graph의 호버 이벤트는 마우스가 그래프 밖으로 나갈 때 해제를 알리지 않고, 같은 점으로 돌아오면 다시 알리지도 않는다.
-// 그래서 호버는 공개 좌표 변환으로 직접 판정한다
-function setupHover(
-  container: HTMLElement,
-  toGraph: (x: number, y: number) => { x: number; y: number },
-  state: ViewState,
-  redraw: () => void,
-): void {
-  function hover(id: string | null): void {
-    if (id === state.hoverId) return;
-    state.hoverId = id;
-    container.style.cursor = id === null ? '' : 'pointer';
-    redraw();
+// 지금 그린 선들의 양 끝. 선 위 근거 말풍선(F-33)의 선 찾기에 쓴다.
+// force-graph가 선의 끝을 점 객체로 바꿔 두므로 점 표를 다시 찾지 않고 그 좌표를 바로 읽는다
+function* segmentsOf(state: ViewState): Iterable<Segment<GraphLink>> {
+  for (const link of state.links) {
+    const [source, target] = [link.source as unknown as ViewNode | string, link.target as unknown as ViewNode | string];
+    if (typeof source === 'string' || typeof target === 'string') continue;
+    if (source.x === undefined || source.y === undefined || target.x === undefined || target.y === undefined) continue;
+    yield { item: link, x1: source.x, y1: source.y, x2: target.x, y2: target.y };
   }
-  container.addEventListener('mousemove', (event) => {
-    const box = container.getBoundingClientRect();
-    const point = toGraph(event.clientX - box.left, event.clientY - box.top);
-    hover(nodeAt(state, point.x, point.y)?.id ?? null);
-  });
-  container.addEventListener('mouseleave', () => hover(null));
 }
 
 // 연결 없는 점은 밀려나 계속 멀어져서 전체 보기가 아주 작아진다. 모든 점을 원점(가운데)으로 약하게 당긴다.
@@ -404,7 +403,9 @@ function createController(graph: ViewGraph, state: ViewState, redraw: () => void
       // 처음 배치를 한 프레임에 몰아 하면 점이 많을 때 화면이 멈춰서(2,000점 약 0.6초), 점 수에 맞춰 줄인다
       graph.warmupTicks(loaded ? 0 : Math.min(WARMUP_TICKS, Math.round(WARMUP_BUDGET / Math.max(1, nodes.length))));
       loaded = true;
-      graph.graphData({ nodes, links: data.links.map((link) => ({ ...link })) });
+      state.links = data.links.map((link) => ({ ...link }));
+      state.hoverLink = null;
+      graph.graphData({ nodes, links: state.links });
       redraw();
     },
     focusNode(id, move = true) {
@@ -419,6 +420,10 @@ function createController(graph: ViewGraph, state: ViewState, redraw: () => void
     },
     setGroupColors(colors) {
       state.groupColors = colors;
+      redraw();
+    },
+    setNodeColors(colors) {
+      state.nodeColors = colors;
       redraw();
     },
     setPath(ids) {
@@ -440,12 +445,38 @@ function createController(graph: ViewGraph, state: ViewState, redraw: () => void
 export function createGraphView(
   container: HTMLElement,
   palette: Palette,
-  handlers: { onNodeClick: (node: GraphNode) => void; onSettled?: () => void },
+  handlers: {
+    onNodeClick: (node: GraphNode) => void;
+    onSettled?: () => void;
+    /** 선에 마우스를 올렸을 때 그 선(끝은 점 ID)과 그래프 영역 안의 위치. 벗어나면 null */
+    onLinkHover?: (link: GraphLink | null, point: { x: number; y: number }) => void;
+  },
 ): GraphView {
-  const state: ViewState = { palette, hoverId: null, focusId: null, hubIds: new Set(), neighbors: new Map(), nodes: new Map(), groupColors: null, thinLinks: false, pull: { x: GRAVITY, y: GRAVITY }, pathNodes: new Set(), pathLinks: new Set() };
+  const state: ViewState = { palette, hoverId: null, focusId: null, hubIds: new Set(), neighbors: new Map(), nodes: new Map(), groupColors: null, thinLinks: false, pull: { x: GRAVITY, y: GRAVITY }, pathNodes: new Set(), pathLinks: new Set(), links: [], hoverLink: null, nodeColors: null };
   const graph = configureGraph(container, state, (node) => handlers.onNodeClick(node));
   graph.d3Force('gravity', gravity(() => state.pull));
+  const hover = setupHover<GraphLink>(container, {
+    toGraph: (x, y) => graph.screen2GraphCoords(x, y),
+    zoom: () => graph.zoom(),
+    nodeAt: (x, y, margin) => nodeAt(state, x, y, margin)?.id ?? null,
+    segments: () => segmentsOf(state),
+    onNode: (id) => {
+      if (id === state.hoverId) return;
+      state.hoverId = id;
+      container.style.cursor = id === null ? '' : 'pointer';
+      redraw();
+    },
+    onLink: (link, point) => {
+      if (link !== state.hoverLink) {
+        state.hoverLink = link;
+        redraw();
+      }
+      handlers.onLinkHover?.(link && { ...link, source: idOf(link.source), target: idOf(link.target) }, point);
+    },
+  });
   graph.onRenderFramePost((ctx, scale) => {
+    // 마우스가 가만히 있어도 확대·배치로 선이 움직였을 수 있어 마지막 위치로 다시 판정한다
+    hover.recheck();
     const [topLeft, bottomRight] = [graph.screen2GraphCoords(0, 0), graph.screen2GraphCoords(graph.width(), graph.height())];
     drawLabels(state, ctx, { scale, left: topLeft.x, top: topLeft.y, right: bottomRight.x, bottom: bottomRight.y });
   });
@@ -453,6 +484,5 @@ export function createGraphView(
   graph.d3Force('charge')?.distanceMax?.(CHARGE_REACH);
   if (handlers.onSettled) graph.onEngineStop(handlers.onSettled);
   const redraw = createRedrawScheduler(graph);
-  setupHover(container, (x, y) => graph.screen2GraphCoords(x, y), state, redraw);
   return createController(graph, state, redraw);
 }
