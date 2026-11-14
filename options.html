@@ -5,79 +5,60 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>Notidian 설정</title>
-    <style>
-      body { font: 15px/1.6 system-ui, sans-serif; margin: 0 auto; padding: 16px; max-width: 720px; }
-      /* fieldset은 기본으로 내용 폭보다 좁아지지 않아 좁은 화면에서 가로 스크롤이 생긴다 */
-      fieldset { margin: 16px 0; padding: 12px 16px; min-width: 0; }
-      legend { font-weight: 600; }
-      ol { padding-left: 1.4em; }
-      button, input, select { font: inherit; margin: 2px 4px 2px 0; }
-      button { padding: 6px 12px; cursor: pointer; }
-      button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid Highlight; outline-offset: 2px; }
-      .token-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-      .token-row input { flex: 1 1 14em; min-width: 0; max-width: 24em; padding: 4px 6px; }
-      .warning { border: 2px solid currentColor; padding: 8px 12px; font-weight: 600; }
-      .hint { font-size: 13px; opacity: 0.85; }
-      .overview { border: 2px solid currentColor; padding: 12px 16px; }
-      .overview h2 { font-size: 16px; margin: 0 0 4px; }
-      #steps { margin: 4px 0 8px; }
-      #steps li[data-state="active"] { font-weight: 700; }
-      #steps li[data-state="todo"] { opacity: 0.75; }
-      .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-      [hidden] { display: none !important; }
-    </style>
   </head>
   <body>
     <main>
-      <h1>Notidian 설정</h1>
+      <h1><img src="/icons/icon-32.png" alt="" />Notidian 설정</h1>
 
-      <section class="overview" aria-labelledby="overview-title">
+      <section class="card overview" aria-labelledby="overview-title">
         <h2 id="overview-title">준비 상황</h2>
         <ol id="steps"></ol>
-        <button id="open-graph" type="button">그래프 열기</button>
-        <button id="open-demo" type="button">예시로 둘러보기</button>
+        <div class="actions">
+          <button id="open-graph" type="button" class="primary">그래프 열기</button>
+          <button id="open-demo" type="button">예시로 둘러보기</button>
+        </div>
         <p class="hint">토큰을 넣기 전에 예시 데이터로 그래프를 먼저 써 볼 수 있어요(저장되지 않아요).</p>
       </section>
 
-      <fieldset>
-        <legend>1. 토큰 준비</legend>
+      <section class="card" aria-labelledby="token-title">
+        <h2 id="token-title">1. 토큰 준비</h2>
         <p>3단계로 준비해요.</p>
         <ol>
           <li>Notion에서 <b>내부 연결</b>을 만들고 권한은 <b>콘텐츠 읽기</b>만 켜요. (<a href="https://developers.notion.com/guides/connections-and-tokens/internal-connections" target="_blank" rel="noreferrer">공식 안내</a>)</li>
           <li>읽을 <b>상위 페이지</b>를 열고 오른쪽 위 ⋯ → 연결에서 방금 만든 연결을 추가해요. 하위 페이지도 함께 읽혀요.</li>
           <li>연결의 토큰을 복사해서 아래에 붙여 넣어요.</li>
         </ol>
-        <p>
-          <label><input type="radio" name="kind" id="kind-internal" value="internal" checked /> 내부 연결 토큰 (권장 · 읽기만 켤 수 있어요)</label><br />
-          <label><input type="radio" name="kind" id="kind-pat" value="pat" /> 개인 접근 토큰(PAT)</label>
-        </p>
+        <div class="choices" role="radiogroup" aria-label="토큰 종류">
+          <label><input type="radio" name="kind" id="kind-internal" value="internal" checked />내부 연결 토큰 (권장 · 읽기만 켤 수 있어요)</label>
+          <label><input type="radio" name="kind" id="kind-pat" value="pat" />개인 접근 토큰(PAT)</label>
+        </div>
         <p id="pat-warning" class="warning" role="alert" hidden>
           PAT는 읽기 전용으로 만들 수 없어요. 토큰이 새면 Notion 내용을 바꾸거나 지울 수 있어요. 가능하면 내부 연결 토큰을 쓰세요.
         </p>
         <p class="token-row">
           <label for="token">토큰</label>
           <input id="token" type="password" autocomplete="off" aria-describedby="token-status" />
-          <button id="save-token" type="button">확인하고 저장</button>
+          <button id="save-token" type="button" class="primary">확인하고 저장</button>
         </p>
         <p id="token-status" role="status" aria-live="polite"></p>
         <p>
-          <label><input id="token-session" type="checkbox" aria-describedby="token-session-hint" /> 브라우저를 닫으면 토큰 지우기</label>
+          <label><input id="token-session" type="checkbox" aria-describedby="token-session-hint" />브라우저를 닫으면 토큰 지우기</label>
         </p>
         <p id="token-session-hint" class="hint">켜면 토큰을 디스크에 남기지 않고 메모리에만 둬요. 더 안전하지만, 브라우저를 다시 켜거나 확장이 새로고침·업데이트될 때마다 토큰을 다시 넣어야 하고, 그동안은 자동으로 다시 만들지 않아요.</p>
-        <p><button id="token-clear" type="button">토큰 지우기</button></p>
+        <p class="actions"><button id="token-clear" type="button" class="danger">토큰 지우기</button></p>
         <p class="hint">토큰은 이 브라우저에만 저장돼요. 암호화되지 않아서 같은 Windows 계정의 다른 프로그램이 읽을 수 있어요.</p>
-      </fieldset>
+      </section>
 
-      <fieldset>
-        <legend>2. 연결 지도 만들기</legend>
+      <section class="card" aria-labelledby="index-title">
+        <h2 id="index-title">2. 연결 지도 만들기</h2>
         <p id="progress"></p>
-        <p>
-          <button id="index-start" type="button" aria-describedby="start-hint">연결 지도 만들기</button>
+        <p class="actions">
+          <button id="index-start" type="button" class="primary" aria-describedby="start-hint">연결 지도 만들기</button>
           <button id="index-stop" type="button">멈추기</button>
-          <button id="index-clear" type="button">저장된 데이터 지우기</button>
+          <button id="index-clear" type="button" class="danger">저장된 데이터 지우기</button>
         </p>
-        <p id="start-hint" hidden>먼저 위에서 토큰을 저장해 주세요.</p>
-        <p>
+        <p id="start-hint" class="hint" hidden>먼저 위에서 토큰을 저장해 주세요.</p>
+        <p class="actions">
           <label for="auto-refresh">자동으로 다시 만들기</label>
           <select id="auto-refresh" aria-describedby="auto-refresh-hint">
             <option value="0">끔</option>
@@ -92,22 +73,22 @@
           처음에는 몇 분 걸려요. 중간에 끊겨도 이어서 읽어요.
           Notion 검색이 수십 초 늦게 반영될 수 있어서, 방금 고친 내용은 잠시 뒤에 보일 수 있어요.
         </p>
-      </fieldset>
+      </section>
 
-      <fieldset>
-        <legend>3. 읽지 못한 페이지</legend>
+      <section class="card" aria-labelledby="unreadable-title">
+        <h2 id="unreadable-title">3. 읽지 못한 페이지</h2>
         <p id="unreadable-summary"></p>
         <ul id="unreadable-list"></ul>
-      </fieldset>
+      </section>
 
-      <fieldset>
-        <legend id="privacy-title">4. 데이터는 어디에 있나요</legend>
+      <section class="card" aria-labelledby="privacy-title">
+        <h2 id="privacy-title">4. 데이터는 어디에 있나요</h2>
         <ul>
           <li>모든 내용은 <b>이 브라우저 안에만</b> 저장돼요: Notion 토큰, 페이지마다 제목·주소·수정 시각·상위 페이지·소속 DB·읽기 상태, 페이지 사이의 연결(어느 페이지가 어느 페이지를 가리키는지), DB 이름, 언급 정리에서 뺀 제목, 그리고 <b>본문 글자</b>("연결 안 된 언급"을 찾는 데만 써요. 코드 블록·속성 값은 빼요). "저장된 데이터 지우기"를 누르면 모두 지워져요.</li>
           <li>이 확장이 접속하는 곳은 Notion 두 곳뿐이에요. <code>api.notion.com</code>에는 읽기 요청만 보내요(페이지·본문 읽기와 검색). <code>app.notion.com</code>에서는 페이지를 열고, 지금 보는 페이지 주소로 그래프에서 그 페이지를 찾아요. Notion 페이지 안에서는 가운데 창을 띄우는 작은 스크립트만 돌고, 페이지 내용은 읽지 않아요. 다른 서버로 보내거나 사용 통계를 모으지 않아요.</li>
           <li>토큰은 "토큰 지우기"로, 연결 지도(제목·연결·DB 이름 등)는 "저장된 데이터 지우기"로 따로 지울 수 있어요. "브라우저를 닫으면 토큰 지우기"를 켜면 토큰은 디스크에 남지 않아요. 확장을 삭제하면 저장된 내용이 모두 지워져요.</li>
         </ul>
-      </fieldset>
+      </section>
     </main>
     <p id="progress-live" class="sr-only" aria-live="polite"></p>
     <script type="module" src="/src/extension/options/main.ts"></script>

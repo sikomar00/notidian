@@ -1,0 +1,30 @@
+/* 설정 화면만의 모양. 공통 값·버튼은 ../ui.css(먼저 읽힌다). main.ts가 둘을 차례로 불러 빌드에서도 순서가 같다 */
+body { background: var(--surface); }
+main { max-width: 720px; margin: 0 auto; padding: 24px 16px 40px; }
+h1 { display: flex; align-items: center; gap: 10px; font-size: 22px; margin: 0 0 16px; }
+h1 img { width: 28px; height: 28px; }
+/* 단계마다 카드 하나. 제목·설명·동작 순서로 위에서 아래로 읽힌다 */
+.card { margin: 0 0 12px; padding: 16px 20px; background: var(--bg); border: 1px solid var(--border); border-radius: calc(var(--radius) + 4px); }
+.card h2 { font-size: 16px; margin: 0 0 8px; }
+.card p { margin: 8px 0; }
+.card ol, .card ul { margin: 8px 0; padding-left: 1.4em; }
+.card li { margin: 4px 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.token-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.token-row input { flex: 1 1 14em; min-width: 0; max-width: 26em; }
+.choices { display: grid; gap: 6px; }
+.warning { padding: 10px 12px; border: 1px solid var(--danger); border-left-width: 4px; border-radius: var(--radius); color: var(--text); font-weight: 600; }
+/* 알림 칸은 비어 있어도 감추지 않는다(감추면 화면 읽기 프로그램이 첫 알림을 놓친다). 글이 있을 때만 상자 모양 */
+#token-status:empty, #auto-refresh-status:empty, #progress:empty { margin: 0; }
+#token-status:not(:empty), #auto-refresh-status:not(:empty) { padding: 8px 12px; background: var(--surface); border-radius: var(--radius); }
+#progress { font-weight: 600; }
+/* 준비 상황: 단계마다 동그라미 표시. 상태는 글자(완료·지금 할 차례·아직)로도 함께 쓴다 */
+.overview { border-color: var(--border-strong); }
+#steps { list-style: none; padding: 0; margin: 4px 0 12px; display: grid; gap: 6px; }
+#steps li { display: flex; align-items: center; gap: 10px; margin: 0; }
+#steps li::before { content: ''; flex: none; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--border-strong); }
+#steps li[data-state='done']::before { background: var(--muted); border-color: var(--muted); }
+#steps li[data-state='active'] { font-weight: 700; }
+#steps li[data-state='active']::before { background: var(--accent); border-color: var(--accent); }
+#steps li[data-state='todo'] { color: var(--muted); }
+#unreadable-list:empty { display: none; }

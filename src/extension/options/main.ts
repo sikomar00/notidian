@@ -1,3 +1,5 @@
+import '../ui.css';
+import './options.css';
 import { createAnnouncer } from '../announce.ts';
 import { openIdbStore } from '../background/idbStore.ts';
 import { IDLE_PROGRESS } from '../background/types.ts';

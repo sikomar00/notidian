@@ -32,6 +32,8 @@ interface ViewState {
 }
 
 const LABEL_ZOOM = 1.6;
+// 이 수 이하의 점이면 모든 이름표에 바탕색 테두리를 그린다(2,000점 그리기 속도 측정 기준을 지키려고 그 위로는 강조한 이름표에만)
+const HALO_NODE_LIMIT = 500;
 const ARROW_LENGTH = 6;
 const WARMUP_TICKS = 80;
 const FOCUS_ZOOM = 3;
@@ -132,10 +134,20 @@ function drawNode(state: ViewState, node: ViewNode, ctx: CanvasRenderingContext2
   const emphasized =
     node.id === state.focusId || state.hubIds.has(node.id) || (state.hoverId !== null && isRelated(state, node.id));
   if (scale > LABEL_ZOOM || emphasized) {
-    ctx.font = `${12 / scale}px system-ui, sans-serif`;
+    const labelY = (node.y ?? 0) + radius + 11 / scale;
+    ctx.save();
+    ctx.font = `${12 / scale}px system-ui, 'Segoe UI', 'Malgun Gothic', sans-serif`;
     ctx.textAlign = 'center';
+    // 이름표 둘레를 바탕색으로 한 번 그려 선·다른 이름표와 겹쳐도 읽히게 한다. 글자 테두리는 비싸서 점이 많으면 강조한 이름표에만
+    if (emphasized || state.nodes.size <= HALO_NODE_LIMIT) {
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 3 / scale;
+      ctx.strokeStyle = palette.background;
+      ctx.strokeText(node.title, node.x ?? 0, labelY);
+    }
     ctx.fillStyle = palette.text;
-    ctx.fillText(node.title, node.x ?? 0, (node.y ?? 0) + radius + 11 / scale);
+    ctx.fillText(node.title, node.x ?? 0, labelY);
+    ctx.restore();
   }
   ctx.globalAlpha = 1;
 }

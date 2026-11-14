@@ -1,0 +1,110 @@
+/* 그래프 화면만의 모양. 공통 값·버튼은 ../ui.css(먼저 읽힌다). main.ts가 둘을 차례로 불러 빌드에서도 순서가 같다 */
+/* 그래프 점 색(팔레트와 같은 값). 범례 견본에 쓴다 */
+:root { --page: #2563eb; --db: #c2410c; --unreadable: #6b7280; }
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; }
+header { padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+.row:last-child { margin-bottom: 0; }
+.grow { flex: 1 1 14em; min-width: 0; max-width: 36em; }
+/* 제목 검색: 돋보기 아이콘을 칸 안에 두고, 넓은 화면에서는 보이는 라벨 대신 안내 문구로 */
+.combo { position: relative; }
+.combo label { display: flex; }
+.combo .icon { position: absolute; left: 8px; top: 50%; translate: 0 -50%; color: var(--muted); pointer-events: none; }
+#search { width: 100%; padding-left: 30px; }
+/* 넓은 화면은 보이는 라벨이 있어서 같은 말이 두 번 보이지 않게 안내 문구를 감춘다 */
+#search::placeholder { color: transparent; }
+.search-label { align-self: center; margin-right: 8px; white-space: nowrap; }
+.combo label { align-items: center; }
+.combo .search-box { position: relative; flex: 1; display: flex; }
+#search-list { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; min-width: 100%; max-height: 40vh; margin: 0; padding: 4px; overflow: auto; list-style: none; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); box-sizing: border-box; }
+#search-list li { padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+#search-list li:hover { background: var(--hover); }
+/* 고른 후보는 바탕만이 아니라 왼쪽 강조 막대(3:1 이상)와 굵기로도 알린다 */
+#search-list li[aria-selected='true'] { background: var(--pressed); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+/* 범례 칩: 눌러서 그 종류를 숨기거나 보인다. 숨긴 상태는 색이 아니라 줄긋기·흐림으로도 알린다 */
+.legend > [role='group'] { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.legend button.kind { min-height: 26px; padding: 2px 10px; border-radius: 999px; }
+/* 숨긴 칩: 글자는 4.5:1을 지키는 보조색에 줄긋기, 테두리는 점선, 견본만 흐리게 */
+.legend button.kind[aria-pressed='false'] { color: var(--muted); text-decoration: line-through; border-style: dashed; border-color: var(--border-strong); }
+.legend button.kind[aria-pressed='false'] .swatch { opacity: 0.35; }
+.swatch { display: inline-block; width: 10px; height: 10px; flex: none; }
+.swatch.page { background: var(--page); border-radius: 50%; }
+.swatch.db { background: var(--db); border-radius: 2px; }
+.swatch.unreadable { width: 6px; height: 6px; border: 2px dashed var(--unreadable); border-radius: 50%; }
+/* 보기·내보내기: 펼치면 아래로 겹쳐 뜨는 작은 판이라 도구줄 높이를 늘리지 않는다 */
+.options { position: relative; }
+.options summary { list-style: none; }
+.options summary::-webkit-details-marker { display: none; }
+.options summary .chevron { transition: rotate 0.15s; }
+.options[open] summary .chevron { rotate: 180deg; }
+.options[open] summary { background: var(--hover); }
+.options-panel { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; gap: 8px; min-width: 15em; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); white-space: nowrap; }
+.panel-title { font-size: 12px; font-weight: 600; color: var(--muted); }
+.export { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
+.export .hint { max-width: 20em; white-space: normal; }
+.local { display: inline-flex; align-items: center; gap: 6px; }
+.local select { min-height: 26px; }
+.legend-db { gap: 12px; font-size: 12px; color: var(--muted); }
+.legend-db > span { display: inline-flex; align-items: center; gap: 6px; }
+.demo { padding: 6px 10px; background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius); }
+#status-row { font-size: 12px; color: var(--muted); }
+#status-row button { font-size: 13px; color: var(--text); }
+/* 알림 칸은 비어 있어도 감추지 않는다(감추면 화면 읽기 프로그램이 첫 알림을 놓친다). 글이 있을 때만 상자 모양 */
+#notice:not(:empty) { margin-top: 6px; padding: 6px 10px; font-size: 13px; background: var(--surface); border-radius: var(--radius); }
+main { flex: 1; min-height: 0; position: relative; }
+#graph-area, #list-view, #cleanup-view { position: absolute; inset: 0; }
+#graph { position: absolute; inset: 0; overflow: hidden; }
+.zoom { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; padding: 2px; background: var(--bg); border: 1px solid var(--border); border-radius: calc(var(--radius) + 2px); box-shadow: var(--shadow); }
+.zoom button { justify-content: center; min-width: 36px; min-height: 36px; padding: 0; border-color: transparent; }
+#empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; margin: 0; padding: 16px; text-align: center; }
+#empty p { max-width: 28em; margin: 0; color: var(--muted); }
+#empty .row { justify-content: center; }
+/* 목록 보기·언급 정리: 그래프 자리를 채우는 스크롤 영역 */
+#list-view, #cleanup-view { overflow: auto; padding: 12px 16px; box-sizing: border-box; }
+#list-view > p, #cleanup-view > p { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+thead th { position: sticky; top: -12px; background: var(--bg); font-size: 12px; font-weight: 600; color: var(--muted); }
+tbody tr:hover { background: var(--surface); }
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td button { min-height: 24px; padding: 1px 8px; font-size: 12px; }
+#cleanup-view h2 { font-size: 16px; margin: 0 0 4px; }
+#cleanup-note:empty { display: none; }
+#cleanup-note { color: var(--text); }
+#cleanup-ignored { margin-bottom: 8px; font-size: 13px; }
+#cleanup-ignored summary { cursor: pointer; color: var(--muted); }
+#cleanup-ignored li { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+#cleanup-list, #cleanup-list ul, #cleanup-ignored ul { list-style: none; margin: 0; padding: 0; }
+#cleanup-list .group { margin-bottom: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+#cleanup-list h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 14px; margin: 0 0 6px; }
+#cleanup-list ul li { padding: 4px 0 4px 10px; border-left: 2px solid var(--border); margin-bottom: 4px; }
+#cleanup-list .snippet { display: block; font-size: 12px; color: var(--muted); }
+#cleanup-list .snippet strong, .mention .snippet strong { color: var(--text); }
+#cleanup-list button, #cleanup-ignored button { min-height: 22px; padding: 0 8px; font-size: 12px; }
+/* 선택한 페이지 서랍: 받은·보낸 연결·연결 안 된 언급. 좁으면 위아래로 쌓이고, 목록이 길면 그 안에서 스크롤한다 */
+.drawer { padding: 10px 12px; max-height: 40vh; overflow: auto; background: var(--surface); border-top: 1px solid var(--border); }
+.drawer > .row { margin-bottom: 8px; }
+#sel-title { font-size: 15px; }
+.links { display: grid; grid-template-columns: repeat(auto-fit, minmax(14em, 1fr)); gap: 8px 20px; }
+.links h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0; }
+.links .hint { margin: 0 0 4px; }
+.links ul { list-style: none; margin: 0; padding: 0; }
+.links li { color: var(--muted); font-size: 13px; padding: 2px 6px; }
+.links li button { display: block; width: 100%; min-height: 0; margin: 0 -6px; padding: 3px 6px; border: none; background: transparent; text-align: left; white-space: normal; font-size: 14px; color: var(--text); }
+.links li button:hover { background: var(--hover); }
+.mention .name { font-weight: 500; }
+.mention .snippet { display: block; font-size: 12px; color: var(--muted); }
+#mentions-note { font-size: 12px; margin: 0 0 4px; color: var(--muted); }
+#mentions-note:empty { display: none; }
+/* 좁은 화면(옆 패널 등): 1줄 보기 방식+설정, 2줄 검색+보기 전환, 범례는 작은 글씨로 모두 보이게 한다(옆으로 넘기면 숨은 항목을 못 찾는다) */
+@media (max-width: 480px) {
+  header { padding: 6px 8px; }
+  .row { gap: 6px; margin-bottom: 4px; }
+  .combo { flex: 1 1 40%; }
+  #search::placeholder { color: var(--muted); }
+  .search-label, .links .hint, .narrow-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .segmented button { padding: 2px 8px; }
+  .legend { font-size: 13px; }
+  .legend button.kind { padding: 2px 8px; }
+}

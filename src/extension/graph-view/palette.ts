@@ -22,9 +22,10 @@ export interface Palette {
 const LIGHT_DB = '#c2410c';
 const DARK_DB = '#d5702a';
 
+// 바탕·글자는 화면 공통 디자인(src/extension/ui.css)과 같은 값이다
 export const LIGHT: Palette = {
   background: '#ffffff',
-  text: '#1d2330',
+  text: '#37352f',
   page: '#2563eb',
   dbItem: LIGHT_DB,
   databases: [LIGHT_DB, '#0e7c56'],
@@ -37,8 +38,8 @@ export const LIGHT: Palette = {
 };
 
 export const DARK: Palette = {
-  background: '#16181d',
-  text: '#e9ecf2',
+  background: '#191919',
+  text: '#e6e6e3',
   page: '#4f8ff0',
   dbItem: DARK_DB,
   databases: [DARK_DB, '#22a878'],
@@ -62,12 +63,9 @@ export function currentPalette(): Palette {
   return matchMedia('(prefers-color-scheme: dark)').matches ? DARK : LIGHT;
 }
 
-/** 화면 바탕·글자색을 그래프와 같은 팔레트에서 가져온다. */
+/** 범례 견본 색을 그래프 점과 같은 팔레트에서 가져온다. 바탕·글자색은 ui.css가 테마에 맞춰 바꾼다. */
 export function applyPaletteVars(palette: Palette): void {
   const style = document.documentElement.style;
-  style.setProperty('--bg', palette.background);
-  style.setProperty('--text', palette.text);
-  style.setProperty('--focus', palette.focus);
   style.setProperty('--page', palette.page);
   style.setProperty('--db', palette.dbItem);
   style.setProperty('--unreadable', palette.unreadable);
