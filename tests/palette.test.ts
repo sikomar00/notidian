@@ -15,6 +15,9 @@ for (const [name, palette] of [['밝은 테마', LIGHT], ['어두운 테마', DA
       const ratio = contrastRatio(palette[key], palette.background);
       assert.ok(ratio >= 3, `${key} ${ratio.toFixed(2)}`);
     }
+    // 색 그룹 여섯 색(F-35)도 바탕과 3:1 이상이고 서로 다른 색이다
+    assert.equal(new Set(palette.groups).size, 6);
+    for (const color of palette.groups) assert.ok(contrastRatio(color, palette.background) >= 3, `group ${color} ${contrastRatio(color, palette.background).toFixed(2)}`);
   });
 }
 

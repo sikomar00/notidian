@@ -45,7 +45,7 @@ export async function optionsAndSeed(browser: Browser, check: Check): Promise<vo
   await empty.run(`document.getElementById('empty-demo').click()`);
   await expect(check, empty, '예시: 버튼을 눌러도 이 탭은 그대로, 예시 탭을 따로 엶', `!location.search.includes('demo') && chrome.storage.session.get('demoTabId').then((s) => typeof s.demoTabId === 'number')`);
   const demo = await browser.open(browser.ext('graph.html?mode=full&demo=1'));
-  await expect(check, demo, '예시: 띠가 보이고 그래프가 그려지며 내 지도 상태 줄은 숨김', `!document.getElementById('demo-banner').hidden && document.getElementById('status-row').hidden && !!document.querySelector('#graph canvas') && document.getElementById('empty').hidden`);
+  await expect(check, demo, '예시: 띠가 보이고 그래프가 그려지며 내 지도 상태 줄은 숨김', `!document.getElementById('demo-banner').hidden && document.getElementById('status').hidden && document.getElementById('reindex').hidden && !!document.querySelector('#graph canvas') && document.getElementById('empty').hidden`);
   await demo.run(`document.getElementById('view-list').click()`);
   await expect(check, demo, '예시: 목록에 예시 페이지 23개', `document.getElementById('list-body').rows.length === 23`, `document.getElementById('list-body').rows.length`);
   await demo.run(`document.querySelector('#list-body tr button').click()`);

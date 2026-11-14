@@ -1,6 +1,6 @@
 // 왜 연결됐나(연결 근거, F-28·F-29)와 경로 찾기(F-31·F-32) 점검. 예시 데이터의 근거를 쓴다
 import { NO_HSCROLL, q } from './fixtures.ts';
-import { expect, waitFor } from './harness.ts';
+import { expect, sleep, waitFor } from './harness.ts';
 import type { Browser, Check, Page } from './harness.ts';
 import { pick } from './graphScenarios.ts';
 
@@ -44,4 +44,47 @@ export async function linkEvidenceAndPath(browser: Browser, check: Check): Promi
   await expect(check, narrow, '경로: 360px에서 가로 넘침 없음', `${NOTE} === '2단계로 이어져요' && ${NO_HSCROLL}`, NOTE);
   await narrow.run(`document.getElementById('path').scrollIntoView()`);
   await narrow.shot('path-360');
+}
+
+// 그래프 위에서 선 색(회색, 빨강·초록·파랑이 같은 픽셀)이면서 주변 16px 안에 점 색(파랑·주황)이 없는 곳을 찾는다.
+// 점 가까이는 점이 먼저 잡히므로(F-33) 선 한가운데를 고른다
+const LINK_PIXEL = `(() => {
+  const canvas = document.querySelector('#graph canvas');
+  const box = canvas.getBoundingClientRect();
+  const { data, width, height } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+  const scale = canvas.width / box.width;
+  const at = (x, y) => { const i = (y * width + x) * 4; return [data[i], data[i + 1], data[i + 2]]; };
+  const colored = (x, y) => { const [r, g, b] = at(x, y); return Math.max(r, g, b) - Math.min(r, g, b) > 60; };
+  const clear = (x, y) => { for (let dy = -16; dy <= 16; dy += 2) for (let dx = -16; dx <= 16; dx += 2) if (colored(x + dx, y + dy)) return false; return true; };
+  for (let y = 20; y < height - 20; y += 3) for (let x = 20; x < width - 20; x += 3) {
+    const [r, g, b] = at(x, y);
+    if (r === g && g === b && r > 110 && r < 160 && clear(x, y)) return { x: box.left + x / scale, y: box.top + y / scale };
+  }
+  return null;
+})()`;
+
+/** 선 위 근거 말풍선(F-33·F-34): 선에 올리면 방향과 근거, 빈 곳·그래프 밖이면 사라진다. */
+export async function linkHover(browser: Browser, check: Check): Promise<void> {
+  const page = await browser.open(browser.ext('graph.html?mode=full&demo=1'));
+  await waitFor(page, `!!document.querySelector('#graph canvas')`);
+  // 배치가 멈출 때까지(같은 선 자리가 두 번 연속 나올 때까지) 기다린다. 고정 시간으로 기다리면 느린 컴퓨터에서 선이 움직인다
+  let spot: { x: number; y: number } | null = null;
+  for (let tries = 0; tries < 30; tries += 1) {
+    await sleep(500);
+    const next = (await page.run(LINK_PIXEL)) as { x: number; y: number } | null;
+    if (next && spot && next.x === spot.x && next.y === spot.y) break;
+    spot = next;
+  }
+  check('선 근거: 그래프에서 선을 찾음', spot !== null, spot);
+  if (!spot) return;
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: spot.x, y: spot.y });
+  await sleep(200);
+  const TIP = `document.querySelector('.link-tooltip')`;
+  await expect(check, page, '선 근거: 선에 올리면 말풍선(방향 표시)', `!${TIP}.hidden && (${TIP}.textContent.includes(' → ') || ${TIP}.textContent.includes('하위 페이지'))`, `${TIP}.textContent`);
+  await expect(check, page, '선 근거: 말풍선은 화면 읽기 프로그램에 숨기고 그래프 영역 안에', `${TIP}.getAttribute('aria-hidden') === 'true' && ${TIP}.getBoundingClientRect().right <= document.getElementById('graph-area').getBoundingClientRect().right + 1`);
+  await page.shot('link-hover');
+  const corner = (await page.run(`(() => { const b = document.getElementById('graph').getBoundingClientRect(); return { x: b.left + 3, y: b.top + 3 }; })()`)) as { x: number; y: number };
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: corner.x, y: corner.y });
+  await sleep(200);
+  await expect(check, page, '선 근거: 빈 곳으로 옮기면 사라짐', `${TIP}.hidden`);
 }
